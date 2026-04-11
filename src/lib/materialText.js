@@ -1,3 +1,5 @@
+import JSZip from "jszip";
+
 const DEFAULT_CHUNK_SIZE = 900;
 const DEFAULT_CHUNK_OVERLAP = 120;
 
@@ -9,6 +11,85 @@ export function normalizeText(value) {
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+function decodeXmlEntities(value) {
+  return String(value || "")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+
+function stripXmlTags(xml, { textTagPattern, lineBreakPattern, slideBreakPattern } = {}) {
+  const source = String(xml || "");
+  if (!source) return "";
+
+  let text = source;
+  if (lineBreakPattern) {
+    text = text.replace(lineBreakPattern, "\n");
+  }
+  if (slideBreakPattern) {
+    text = text.replace(slideBreakPattern, "\n\n");
+  }
+
+  const lines = [];
+  const regex = textTagPattern || /<[^>]*:t[^>]*>([\s\S]*?)<\/[^>]*:t>/g;
+  let match;
+  while ((match = regex.exec(text))) {
+    const value = decodeXmlEntities(match[1]).replace(/<[^>]+>/g, "");
+    if (value.trim()) lines.push(value);
+  }
+
+  return normalizeText(lines.join(" "));
+}
+
+async function readZipFiles(arrayBuffer) {
+  const zip = await JSZip.loadAsync(arrayBuffer);
+  return zip;
+}
+
+async function extractDocxText(arrayBuffer) {
+  const zip = await readZipFiles(arrayBuffer);
+  const entries = Object.keys(zip.files)
+    .filter((name) => /^word\/(document|footnotes|endnotes|header\d*|footer\d*)\.xml$/i.test(name))
+    .sort((a, b) => a.localeCompare(b));
+
+  const sections = [];
+  for (const entry of entries) {
+    const xml = await zip.files[entry].async("string");
+    const text = stripXmlTags(xml, {
+      lineBreakPattern: /<\/w:p>|<w:br[^>]*\/>|<w:tab[^>]*\/>/g,
+      textTagPattern: /<w:t[^>]*>([\s\S]*?)<\/w:t>/g,
+    });
+    if (text) sections.push(text);
+  }
+
+  return normalizeText(sections.join("\n\n"));
+}
+
+async function extractPptxText(arrayBuffer) {
+  const zip = await readZipFiles(arrayBuffer);
+  const entries = Object.keys(zip.files)
+    .filter((name) => /^ppt\/slides\/slide\d+\.xml$/i.test(name))
+    .sort((a, b) => {
+      const left = Number(a.match(/slide(\d+)\.xml/i)?.[1] || 0);
+      const right = Number(b.match(/slide(\d+)\.xml/i)?.[1] || 0);
+      return left - right;
+    });
+
+  const sections = [];
+  for (const entry of entries) {
+    const xml = await zip.files[entry].async("string");
+    const text = stripXmlTags(xml, {
+      lineBreakPattern: /<\/a:p>|<a:br[^>]*\/>|<a:tab[^>]*\/>/g,
+      textTagPattern: /<a:t[^>]*>([\s\S]*?)<\/a:t>/g,
+    });
+    if (text) sections.push(text);
+  }
+
+  return normalizeText(sections.join("\n\n"));
 }
 
 export function chunkText(text, { chunkSize = DEFAULT_CHUNK_SIZE, overlap = DEFAULT_CHUNK_OVERLAP } = {}) {
@@ -151,6 +232,22 @@ export async function extractUploadText(file) {
     return normalizeText(textDecoder.decode(bytes));
   }
 
+  if (mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || /\.docx$/i.test(name)) {
+    try {
+      return await extractDocxText(arrayBuffer);
+    } catch {
+      return normalizeText(textDecoder.decode(bytes));
+    }
+  }
+
+  if (mime === "application/vnd.openxmlformats-officedocument.presentationml.presentation" || /\.pptx$/i.test(name)) {
+    try {
+      return await extractPptxText(arrayBuffer);
+    } catch {
+      return normalizeText(textDecoder.decode(bytes));
+    }
+  }
+
   if (mime === "application/pdf" || /\.pdf$/i.test(name)) {
     const decoded = decodePdfText(bytes);
     if (decoded) return decoded;
@@ -168,4 +265,3 @@ export function buildMaterialChunks(text, { maxChunkChars = DEFAULT_CHUNK_SIZE, 
       text: chunk,
     }));
 }
-
