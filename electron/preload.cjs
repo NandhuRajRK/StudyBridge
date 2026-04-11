@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld("studybridgeDesktop", {
   setAiSettings: (payload) => ipcRenderer.invoke("studybridge:set-ai-settings", payload),
   waitForLocalAi: () => ipcRenderer.invoke("studybridge:wait-local-ai"),
   invokeAgentRuntime: (payload) => ipcRenderer.invoke("studybridge:invoke-agent-runtime", payload),
+  installAgentProvider: (provider) => ipcRenderer.invoke("studybridge:install-agent-provider", provider),
   invokeGoogleGemini: (payload) => ipcRenderer.invoke("studybridge:invoke-google-gemini", payload),
   getLocalProfile: () => ipcRenderer.invoke("studybridge:get-local-profile"),
   updateLocalProfile: (payload) => ipcRenderer.invoke("studybridge:update-local-profile", payload),

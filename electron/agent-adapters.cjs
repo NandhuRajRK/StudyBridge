@@ -2,14 +2,17 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 
-function runCommand(command, args, { cwd, input, timeoutMs = 10 * 60 * 1000 } = {}) {
+function runCommand(command, args, { cwd, input, timeoutMs = 10 * 60 * 1000, env = {} } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd,
       shell: process.platform === "win32",
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
-      env: process.env,
+      env: {
+        ...process.env,
+        ...env,
+      },
     });
 
     let stdout = "";
@@ -108,6 +111,9 @@ function getProviderCommand(provider) {
   if (provider === "codex-cli") {
     return { command: "codex", availableArgs: ["--version"] };
   }
+  if (provider === "opencode-cli") {
+    return { command: "opencode", availableArgs: ["--version"] };
+  }
   return null;
 }
 
@@ -136,6 +142,32 @@ async function preparePromptWorkspace(baseDir, prompt, response_json_schema) {
   const promptBody = `${prompt}${buildSchemaHint(response_json_schema)}\n`;
   await fs.writeFile(promptPath, promptBody, "utf8");
   return promptPath;
+}
+
+async function writeOpenCodeConfig(baseDir, { baseUrl }) {
+  const configPath = path.join(baseDir, "opencode.json");
+  const config = {
+    $schema: "https://opencode.ai/config.json",
+    enabled_providers: ["studybridge-local"],
+    provider: {
+      "studybridge-local": {
+        npm: "@ai-sdk/openai-compatible",
+        name: "StudyBridge Local Gemma",
+        options: {
+          baseURL: baseUrl,
+        },
+        models: {
+          "gemma-local": {
+            name: "Gemma local",
+          },
+        },
+      },
+    },
+    model: "studybridge-local/gemma-local",
+    small_model: "studybridge-local/gemma-local",
+  };
+  await fs.writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  return configPath;
 }
 
 async function invokeAgentProvider(provider, { prompt, response_json_schema, cwd }) {
@@ -186,10 +218,54 @@ async function invokeAgentProvider(provider, { prompt, response_json_schema, cwd
     return response_json_schema ? extractJson(text) : text;
   }
 
+  if (provider === "opencode-cli") {
+    const baseUrl = process.env.VITE_LLAMACPP_URL || "http://127.0.0.1:8080/v1";
+    await writeOpenCodeConfig(workspaceDir, { baseUrl });
+    const { stdout } = await runCommand(
+      "opencode",
+      [
+        "run",
+        "--format",
+        "json",
+        "--file",
+        "prompt.md",
+        userPrompt,
+      ],
+      {
+        cwd: workspaceDir,
+        timeoutMs: 20 * 60 * 1000,
+        input: "",
+        env: {
+          OPENCODE_CONFIG: path.join(workspaceDir, "opencode.json"),
+        },
+      },
+    );
+
+    const text = parseCodexJsonStream(stdout);
+    return response_json_schema ? extractJson(text) : text;
+  }
+
   throw new Error(`Unsupported external agent provider: ${provider}`);
+}
+
+async function installAgentProvider(provider) {
+  const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+  let packageName = "";
+  if (provider === "claude-code") packageName = "@anthropic-ai/claude-code";
+  if (provider === "codex-cli") packageName = "@openai/codex";
+  if (provider === "opencode-cli") packageName = "opencode-ai";
+
+  if (!packageName) {
+    throw new Error("Unsupported provider install request.");
+  }
+
+  return runCommand(npmCommand, ["install", "-g", packageName], {
+    timeoutMs: 20 * 60 * 1000,
+  });
 }
 
 module.exports = {
   detectAgentProvider,
   invokeAgentProvider,
+  installAgentProvider,
 };

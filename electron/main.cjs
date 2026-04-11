@@ -2,7 +2,7 @@ const { app, BrowserWindow, shell, ipcMain, dialog } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs/promises");
 const { startLocalAi, getHardwarePreset } = require("./local-ai.cjs");
-const { detectAgentProvider, invokeAgentProvider } = require("./agent-adapters.cjs");
+const { detectAgentProvider, installAgentProvider, invokeAgentProvider } = require("./agent-adapters.cjs");
 const { DEFAULT_CONFIG, readConfig, writeConfig, mergeConfig } = require("./config.cjs");
 const {
   listRows,
@@ -408,6 +408,22 @@ ipcMain.handle("studybridge:invoke-agent-runtime", async (_event, payload = {}) 
     response_json_schema: responseJsonSchema,
     cwd,
   });
+});
+ipcMain.handle("studybridge:install-agent-provider", async (_event, provider) => {
+  if (!provider || provider === "none") {
+    throw new Error("No external agent provider selected.");
+  }
+
+  const result = await installAgentProvider(provider);
+  if (appConfig.ai?.agentProvider === provider) {
+    await syncRuntimeFromConfig();
+  }
+
+  return {
+    provider,
+    ...result,
+    runtime: runtimeForRenderer(),
+  };
 });
 ipcMain.handle("studybridge:invoke-google-gemini", async (_event, payload = {}) => {
   const aiConfig = appConfig.ai || {};
