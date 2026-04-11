@@ -114,6 +114,9 @@ function getProviderCommand(provider) {
   if (provider === "opencode-cli") {
     return { command: "opencode", availableArgs: ["--version"] };
   }
+  if (provider === "gemini-cli") {
+    return { command: "gemini", availableArgs: ["--version"] };
+  }
   return null;
 }
 
@@ -170,7 +173,7 @@ async function writeOpenCodeConfig(baseDir, { baseUrl }) {
   return configPath;
 }
 
-async function invokeAgentProvider(provider, { prompt, response_json_schema, cwd }) {
+async function invokeAgentProvider(provider, { prompt, response_json_schema, cwd, model }) {
   if (!provider) {
     throw new Error("No external agent provider selected.");
   }
@@ -245,6 +248,30 @@ async function invokeAgentProvider(provider, { prompt, response_json_schema, cwd
     return response_json_schema ? extractJson(text) : text;
   }
 
+  if (provider === "gemini-cli") {
+    const args = [
+      "-p",
+      userPrompt,
+    ];
+
+    if (typeof model === "string" && model.trim()) {
+      args.unshift(model.trim());
+      args.unshift("-m");
+    }
+
+    const { stdout } = await runCommand(
+      "gemini",
+      args,
+      {
+        cwd: workspaceDir,
+        timeoutMs: 20 * 60 * 1000,
+      },
+    );
+
+    const text = parseCodexJsonStream(stdout) || stdout.trim();
+    return response_json_schema ? extractJson(text) : text;
+  }
+
   throw new Error(`Unsupported external agent provider: ${provider}`);
 }
 
@@ -254,6 +281,7 @@ async function installAgentProvider(provider) {
   if (provider === "claude-code") packageName = "@anthropic-ai/claude-code";
   if (provider === "codex-cli") packageName = "@openai/codex";
   if (provider === "opencode-cli") packageName = "opencode-ai";
+  if (provider === "gemini-cli") packageName = "@google/gemini-cli";
 
   if (!packageName) {
     throw new Error("Unsupported provider install request.");

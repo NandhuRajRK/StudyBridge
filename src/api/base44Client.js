@@ -581,6 +581,7 @@ export const base44 = {
             return invokeDesktopAgentRuntime({
               ...payload,
               provider: desktopAgentProvider,
+              model: desktopAiSettings?.googleModel || geminiModel,
             });
           }
 

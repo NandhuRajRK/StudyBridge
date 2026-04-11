@@ -6,10 +6,12 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { User, Bell, GraduationCap, Save, Loader2, SlidersHorizontal, Bot, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 import { isDesktopApp } from "@/lib/runtime";
 import { useLocale } from "@/lib/locale";
+import { AGENT_PROVIDER_DOCS, getAgentProviderDoc, OFFICIAL_RUNTIME_DOCS } from "@/lib/providerDocs";
 
 const defaultLimits = {
   planner_item_limit: 8,
@@ -51,6 +53,10 @@ function describeAiStatus(status) {
   if (status === "disabled") return "Disabled";
   if (status === "error") return "Error";
   return status || "Unknown";
+}
+
+function providerLabel(provider) {
+  return getAgentProviderDoc(provider)?.label || provider || "Built-in runtime";
 }
 
 function serializeAiSettings(settings) {
@@ -205,7 +211,7 @@ export default function Settings() {
       if (window.studybridgeDesktop?.getRuntimeConfig) {
         setAiRuntime(await window.studybridgeDesktop.getRuntimeConfig());
       }
-      toast.success(`${provider === "opencode-cli" ? "OpenCode CLI" : provider} installed`);
+      toast.success(`${providerLabel(provider)} installed`);
     } catch (error) {
       toast.error(error?.message || "Failed to install provider");
     } finally {
@@ -343,9 +349,9 @@ export default function Settings() {
                   <SelectTrigger><SelectValue placeholder="Use built-in model" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Built-in runtime</SelectItem>
-                    <SelectItem value="opencode-cli">{t("settings.openCodeCli")}</SelectItem>
-                    <SelectItem value="claude-code">Claude Code CLI</SelectItem>
-                    <SelectItem value="codex-cli">OpenAI Codex CLI</SelectItem>
+                    {AGENT_PROVIDER_DOCS.map((provider) => (
+                      <SelectItem key={provider.value} value={provider.value}>{provider.label}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
@@ -361,7 +367,9 @@ export default function Settings() {
                       <p className="text-sm text-muted-foreground">
                         {aiSettings.agentProvider === "opencode-cli"
                           ? t("settings.opencodeLocalBody")
-                          : "This provider runs in the background and uses the model or account configured by that CLI."}
+                          : aiSettings.agentProvider === "gemini-cli"
+                            ? "Gemini CLI uses Google's terminal agent workflow. StudyBridge installs it on demand and leaves sign-in or authorization to the CLI."
+                            : "This provider runs in the background and uses the model or account configured by that CLI."}
                       </p>
                     </div>
                     <span className="text-xs rounded-full bg-primary/10 text-primary px-2 py-1">
@@ -384,8 +392,27 @@ export default function Settings() {
                     <p className="text-xs text-muted-foreground">
                       {aiSettings.agentProvider === "opencode-cli"
                         ? "OpenCode will use the local Gemma runtime configured in this app."
-                        : "Install from inside StudyBridge, then authorize the provider if it requires it."}
+                        : aiSettings.agentProvider === "gemini-cli"
+                          ? "Install Gemini CLI from inside StudyBridge, then authorize it with your Google account if required."
+                          : "Install from inside StudyBridge, then authorize the provider if it requires it."}
                     </p>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button type="button" variant="ghost" className="px-2 gap-2">
+                          Official docs
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start" className="w-72">
+                        {OFFICIAL_RUNTIME_DOCS.map((doc) => (
+                          <DropdownMenuItem key={doc.href} asChild>
+                            <a href={doc.href} target="_blank" rel="noreferrer" className="block">
+                              <span className="font-medium">{doc.label}</span>
+                            </a>
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 </div>
               )}

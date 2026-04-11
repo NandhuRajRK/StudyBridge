@@ -402,11 +402,15 @@ ipcMain.handle("studybridge:invoke-agent-runtime", async (_event, payload = {}) 
   }
 
   const responseJsonSchema = payload.response_json_schema || null;
+  const model = typeof payload.model === "string" && payload.model.trim()
+    ? payload.model.trim()
+    : (aiConfig.googleModel || "");
   const cwd = await fs.mkdtemp(path.join(app.getPath("userData"), "agent-runtime-"));
   return invokeAgentProvider(provider, {
     prompt,
     response_json_schema: responseJsonSchema,
     cwd,
+    model,
   });
 });
 ipcMain.handle("studybridge:install-agent-provider", async (_event, provider) => {
