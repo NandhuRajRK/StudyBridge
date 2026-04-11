@@ -6,6 +6,7 @@ const DEFAULT_CONFIG = {
     mode: "ask",
     localModelConsent: false,
     cloudProvider: "google",
+    agentProvider: "none",
     googleApiKey: "",
     googleModel: "gemini-2.5-flash",
     safetyLimits: {

@@ -12,7 +12,14 @@ export async function loadDesktopAiRuntime() {
 }
 
 export function isDesktopAiUnavailable(runtime) {
-  return Boolean(runtime) && ["disabled", "missing_key", "error", "awaiting_choice", "rate_limited"].includes(runtime.status);
+  return Boolean(runtime) && [
+    "disabled",
+    "missing_key",
+    "error",
+    "awaiting_choice",
+    "rate_limited",
+    "missing_provider",
+  ].includes(runtime.status);
 }
 
 export function getDesktopAiNotice(runtime, t = (key, fallback = "") => fallback) {
@@ -31,6 +38,9 @@ export function getDesktopAiNotice(runtime, t = (key, fallback = "") => fallback
   }
   if (runtime.status === "rate_limited") {
     return runtime.error || t("ai.rateLimited", {}, "Cloud AI usage limit reached. Open Settings to review your budget or wait for the reset.");
+  }
+  if (runtime.status === "missing_provider") {
+    return runtime.error || "External agent provider not found. Install Claude Code or Codex CLI, or switch back to Gemma/Google in Settings.";
   }
   return "";
 }

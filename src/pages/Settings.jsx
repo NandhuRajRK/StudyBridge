@@ -25,6 +25,7 @@ const defaultAiSettings = {
   mode: "ask",
   localModelConsent: false,
   cloudProvider: "google",
+  agentProvider: "none",
   hasGoogleApiKey: false,
   googleApiKey: "",
   googleModel: "gemini-2.5-flash",
@@ -43,6 +44,7 @@ function describeAiStatus(status) {
   if (status === "ready") return "Ready";
   if (status === "starting") return "Starting";
   if (status === "downloading-model") return "Preparing local Gemma";
+  if (status === "missing_provider") return "External provider missing";
   if (status === "missing_key") return "Google API key missing";
   if (status === "awaiting_choice") return "Waiting for your choice";
   if (status === "rate_limited") return "Cloud AI budget reached";
@@ -56,6 +58,7 @@ function serializeAiSettings(settings) {
     mode: settings.mode,
     localModelConsent: Boolean(settings.localModelConsent),
     cloudProvider: settings.cloudProvider || "google",
+    agentProvider: settings.agentProvider && settings.agentProvider !== "none" ? settings.agentProvider : "none",
     googleModel: settings.googleModel || "gemini-2.5-flash",
     cloudBudget: {
       dailyRequestLimit: parseInt(settings.cloudBudget?.dailyRequestLimit, 10) || defaultAiSettings.cloudBudget.dailyRequestLimit,
@@ -114,7 +117,7 @@ export default function Settings() {
             window.studybridgeDesktop.getAiSettings(),
             window.studybridgeDesktop.getRuntimeConfig(),
           ]);
-          setAiSettings(prev => ({ ...prev, ...desktopSettings, googleApiKey: "" }));
+        setAiSettings(prev => ({ ...prev, ...desktopSettings, googleApiKey: "" }));
           setAiRuntime(runtime);
         } catch (error) {
           console.error("Failed to load desktop AI settings", error);
@@ -306,6 +309,20 @@ export default function Settings() {
                 </Select>
               </Field>
 
+              <Field label="Background agent provider">
+            <Select value={aiSettings.agentProvider || "none"} onValueChange={v => setAiSettings(f => ({ ...f, agentProvider: v }))}>
+                  <SelectTrigger><SelectValue placeholder="Use built-in model" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Built-in runtime</SelectItem>
+                    <SelectItem value="claude-code">Claude Code CLI</SelectItem>
+                    <SelectItem value="codex-cli">OpenAI Codex CLI</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Optional. Uses an installed terminal agent in the background. This does not include any subscription or API credits.
+                </p>
+              </Field>
+
               {(aiSettings.mode === "ask" || aiSettings.mode === "disabled") && (
                 <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
                   <p className="text-sm text-muted-foreground">
@@ -382,6 +399,7 @@ export default function Settings() {
               <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
                 <p className="font-medium text-foreground">{t("settings.currentState")}</p>
                 <p>Mode: {aiRuntime?.aiMode || aiSettings.mode}</p>
+                {aiRuntime?.provider && <p>External provider: {aiRuntime.provider}</p>}
                 <p>Status: {describeAiStatus(aiRuntime?.status)}</p>
                 {aiSettings.hasGoogleApiKey && <p>Google key: saved on this device</p>}
                 {aiRuntime?.cloudBudget && (
