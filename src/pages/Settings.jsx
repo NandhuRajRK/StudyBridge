@@ -87,6 +87,7 @@ export default function Settings() {
   });
   const [aiSettings, setAiSettings] = useState(defaultAiSettings);
   const [aiRuntime, setAiRuntime] = useState(null);
+  const [installingProvider, setInstallingProvider] = useState(false);
   const [notifications, setNotifications] = useState({ study_reminders: true, task_due: true, weekly_summary: false });
   const [saving, setSaving] = useState(false);
   const isDesktop = isDesktopApp();
@@ -182,6 +183,34 @@ export default function Settings() {
     }
     setAiSettings(next);
     toast.success("Google API key cleared");
+  };
+
+  const handleInstallAgentProvider = async () => {
+    const provider = aiSettings.agentProvider && aiSettings.agentProvider !== "none"
+      ? aiSettings.agentProvider
+      : "";
+    if (!provider) {
+      toast.error("Choose a background provider first");
+      return;
+    }
+
+    if (!window.studybridgeDesktop?.installAgentProvider) {
+      toast.error("Provider installation is unavailable in this build");
+      return;
+    }
+
+    setInstallingProvider(true);
+    try {
+      await window.studybridgeDesktop.installAgentProvider(provider);
+      if (window.studybridgeDesktop?.getRuntimeConfig) {
+        setAiRuntime(await window.studybridgeDesktop.getRuntimeConfig());
+      }
+      toast.success(`${provider === "opencode-cli" ? "OpenCode CLI" : provider} installed`);
+    } catch (error) {
+      toast.error(error?.message || "Failed to install provider");
+    } finally {
+      setInstallingProvider(false);
+    }
   };
 
   if (!user) return (
@@ -309,19 +338,57 @@ export default function Settings() {
                 </Select>
               </Field>
 
-              <Field label="Background agent provider">
-            <Select value={aiSettings.agentProvider || "none"} onValueChange={v => setAiSettings(f => ({ ...f, agentProvider: v }))}>
+              <Field label={t("settings.backgroundAgentProvider")}>
+                <Select value={aiSettings.agentProvider || "none"} onValueChange={v => setAiSettings(f => ({ ...f, agentProvider: v }))}>
                   <SelectTrigger><SelectValue placeholder="Use built-in model" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Built-in runtime</SelectItem>
+                    <SelectItem value="opencode-cli">{t("settings.openCodeCli")}</SelectItem>
                     <SelectItem value="claude-code">Claude Code CLI</SelectItem>
                     <SelectItem value="codex-cli">OpenAI Codex CLI</SelectItem>
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  Optional. Uses an installed terminal agent in the background. This does not include any subscription or API credits.
+                  {t("settings.providerInstallBody")}
                 </p>
               </Field>
+
+              {aiSettings.agentProvider && aiSettings.agentProvider !== "none" && (
+                <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="space-y-1">
+                      <p className="font-medium">{t("settings.backgroundAgentProvider")}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {aiSettings.agentProvider === "opencode-cli"
+                          ? t("settings.opencodeLocalBody")
+                          : "This provider runs in the background and uses the model or account configured by that CLI."}
+                      </p>
+                    </div>
+                    <span className="text-xs rounded-full bg-primary/10 text-primary px-2 py-1">
+                      {aiRuntime?.status === "ready" ? t("settings.providerReady") : t("settings.providerMissing")}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleInstallAgentProvider}
+                      disabled={installingProvider || aiRuntime?.status === "ready"}
+                    >
+                      {installingProvider
+                        ? "Installing..."
+                        : aiRuntime?.status === "ready"
+                          ? t("settings.providerReady")
+                          : t("settings.installSelectedProvider")}
+                    </Button>
+                    <p className="text-xs text-muted-foreground">
+                      {aiSettings.agentProvider === "opencode-cli"
+                        ? "OpenCode will use the local Gemma runtime configured in this app."
+                        : "Install from inside StudyBridge, then authorize the provider if it requires it."}
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {(aiSettings.mode === "ask" || aiSettings.mode === "disabled") && (
                 <div className="rounded-lg border bg-muted/20 p-4 space-y-3">

@@ -40,7 +40,7 @@ export function getDesktopAiNotice(runtime, t = (key, fallback = "") => fallback
     return runtime.error || t("ai.rateLimited", {}, "Cloud AI usage limit reached. Open Settings to review your budget or wait for the reset.");
   }
   if (runtime.status === "missing_provider") {
-    return runtime.error || "External agent provider not found. Install Claude Code or Codex CLI, or switch back to Gemma/Google in Settings.";
+    return runtime.error || "External agent provider not found. Install OpenCode CLI, Claude Code, or Codex CLI in Settings, or switch back to Gemma/Google.";
   }
   return "";
 }
