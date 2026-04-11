@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { base44 } from "@/api/base44Client";
+import { studybridge } from "@/api/studybridgeClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -15,7 +15,7 @@ export default function StudyNotes({ courseId, topicId, sessionId }) {
   const handleSave = async () => {
     if (!content.trim()) return;
     setSaving(true);
-    await base44.entities.Note.create({
+    await studybridge.entities.Note.create({
       course_id: courseId,
       topic_id: topicId,
       session_id: sessionId,

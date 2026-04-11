@@ -3,7 +3,7 @@ import {
   LayoutDashboard, BookOpen, Brain, Calendar, 
   TrendingUp, Library, Bot, Settings, LogOut, GraduationCap, GitBranch, FileText
 } from "lucide-react";
-import { base44 } from "@/api/base44Client";
+import { studybridge } from "@/api/studybridgeClient";
 import { useState, useEffect } from "react";
 import { isDesktopApp } from "@/lib/runtime";
 import { useLocale } from "@/lib/locale";
@@ -24,12 +24,12 @@ const navItems = [
 export default function Layout() {
   const location = useLocation();
   const [user, setUser] = useState(null);
-  const [collapsed, setCollapsed] = useState(false);
+  const collapsed = false;
   const { t } = useLocale();
   const isDesktop = isDesktopApp();
 
   useEffect(() => {
-    base44.auth.me().then(setUser).catch(() => {});
+    studybridge.auth.me().then(setUser).catch(() => {});
   }, []);
 
   const isActive = (path) => {
@@ -85,7 +85,7 @@ export default function Layout() {
             )}
             {!collapsed && !isDesktop && (
               <button 
-                onClick={() => base44.auth.logout()} 
+                onClick={() => studybridge.auth.logout()} 
                 className="text-sidebar-foreground/40 hover:text-sidebar-foreground/70 transition-colors"
               >
                 <LogOut className="w-3.5 h-3.5" />

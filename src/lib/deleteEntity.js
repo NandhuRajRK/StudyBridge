@@ -1,4 +1,4 @@
-import { base44 } from "@/api/base44Client";
+import { studybridge } from "@/api/studybridgeClient";
 
 const relatedCourseEntities = [
   "StudyMaterial",
@@ -20,7 +20,7 @@ export async function deleteEntity(entityName, item) {
 
   if (entityName === "Course") {
     for (const relatedEntity of relatedCourseEntities) {
-      const rows = await base44.entities[relatedEntity].filter({ course_id: item.id }, null, 500);
+      const rows = await studybridge.entities[relatedEntity].filter({ course_id: item.id }, null, 500);
       for (const row of rows) {
         await deleteEntity(relatedEntity, row);
       }
@@ -28,17 +28,17 @@ export async function deleteEntity(entityName, item) {
   }
 
   if (entityName === "Quiz") {
-    const questions = await base44.entities.QuizQuestion.filter({ quiz_id: item.id }, null, 500);
+    const questions = await studybridge.entities.QuizQuestion.filter({ quiz_id: item.id }, null, 500);
     for (const question of questions) {
       await deleteEntity("QuizQuestion", question);
     }
   }
 
   if (entityName === "StudyMaterial" && item.file_url) {
-    await base44.integrations.Core.DeleteFile({ file_url: item.file_url });
+    await studybridge.integrations.Core.DeleteFile({ file_url: item.file_url });
   }
 
-  await base44.entities[entityName].delete(item.id);
+  await studybridge.entities[entityName].delete(item.id);
 }
 
 export async function confirmAndDelete(entityName, item, label = "item") {

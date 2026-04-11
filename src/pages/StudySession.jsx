@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { base44 } from "@/api/base44Client";
+import { studybridge } from "@/api/studybridgeClient";
 import { useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -83,7 +83,7 @@ export default function StudySession() {
   };
 
   const handleConfidenceBefore = async (confidence) => {
-    const s = await base44.entities.StudySession.create({
+    const s = await studybridge.entities.StudySession.create({
       course_id: course.id,
       topic_id: topic.id,
       course_title: course.title,
@@ -103,7 +103,7 @@ export default function StudySession() {
     setGenerating(true);
     try {
       const contextBundle = await loadStudyContextBundle({ course, topic });
-      const result = await base44.integrations.Core.InvokeLLM({
+      const result = await studybridge.integrations.Core.InvokeLLM({
         prompt: `You are an expert university tutor inside StudyBridge. Generate study content for the topic "${topic.title}" in the course "${course.title}".
 
 Use this live StudyBridge context as the source of truth:
@@ -155,7 +155,7 @@ Return as JSON with this structure:
 
   const handleConfidenceAfter = async (confidence) => {
     const duration = Math.max(1, Math.round(elapsedSeconds / 60));
-    await base44.entities.StudySession.update(session.id, {
+    await studybridge.entities.StudySession.update(session.id, {
       status: 'completed',
       completed_at: new Date().toISOString(),
       duration_minutes: duration,
@@ -164,7 +164,7 @@ Return as JSON with this structure:
 
     // Update topic mastery
     const newMastery = Math.min(100, (topic.mastery_level || 0) + Math.round(duration * 1.5));
-    await base44.entities.Topic.update(topic.id, {
+    await studybridge.entities.Topic.update(topic.id, {
       mastery_level: newMastery,
       confidence: confidence,
       status: newMastery >= 80 ? 'mastered' : newMastery > 0 ? 'in_progress' : 'not_started',

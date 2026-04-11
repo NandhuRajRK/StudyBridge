@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { base44 } from "@/api/base44Client";
+import { studybridge } from "@/api/studybridgeClient";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,13 +29,13 @@ export default function MaterialUploader({ open, onClose, courseId, topics, onUp
     setUploading(true);
     try {
       // Upload file
-      const { file_url } = await base44.integrations.Core.UploadFile({ file });
+      const { file_url } = await studybridge.integrations.Core.UploadFile({ file });
       const extractedText = await extractUploadText(file);
       const chunks = buildMaterialChunks(extractedText, { maxChunks: 8 });
       const excerpt = normalizeText(extractedText).slice(0, 2000);
       
       // Create material record
-      const material = await base44.entities.StudyMaterial.create({
+      const material = await studybridge.entities.StudyMaterial.create({
         course_id: courseId,
         topic_id: topicId || undefined,
         title: title.trim(),
@@ -53,7 +53,7 @@ export default function MaterialUploader({ open, onClose, courseId, topics, onUp
       setUploading(false);
       setProcessing(true);
 
-      const [course] = await base44.entities.Course.filter({ id: courseId }, null, 1);
+      const [course] = await studybridge.entities.Course.filter({ id: courseId }, null, 1);
       const selectedTopic = topics.find(t => t.id === topicId);
       const fallbackSummary = `Uploaded material saved for ${course?.title || "this course"}${selectedTopic?.title ? ` and linked to ${selectedTopic.title}` : ""}. AI summary is unavailable until you enable local Gemma or add a cloud API key.`;
 
@@ -64,7 +64,7 @@ export default function MaterialUploader({ open, onClose, courseId, topics, onUp
       };
 
       try {
-        summary = await base44.integrations.Core.InvokeLLM({
+        summary = await studybridge.integrations.Core.InvokeLLM({
           prompt: `You are analyzing an uploaded StudyBridge material. You may use the extracted text below when present, but do not claim to have seen any file structure beyond what is explicitly provided.
 
 Course: ${course?.title || "Unknown"} ${course?.code ? `(${course.code})` : ""}
@@ -90,7 +90,7 @@ Based on the metadata and excerpt, generate a cautious 2-3 sentence summary and 
         }
       }
 
-      await base44.entities.StudyMaterial.update(material.id, {
+      await studybridge.entities.StudyMaterial.update(material.id, {
         status: 'processed',
         summary: summary.summary,
         extracted_topics: summary.extracted_topics,

@@ -1,4 +1,4 @@
-import { base44 } from "@/api/base44Client";
+import { studybridge } from "@/api/studybridgeClient";
 import { buildMaterialChunks, rankChunks, normalizeText } from "@/lib/materialText";
 
 const truncate = (value, max = 700) => {
@@ -135,7 +135,7 @@ function buildMaterialPassages(materials = [], { course, topic, limits }) {
 }
 
 export async function loadProfileContext() {
-  const profile = await base44.auth.me();
+  const profile = await studybridge.auth.me();
   return buildProfileContext(profile);
 }
 
@@ -145,7 +145,7 @@ export async function loadStudyContext({ course, topic }) {
 }
 
 export async function loadStudyContextBundle({ course, topic }) {
-  const profile = await base44.auth.me();
+  const profile = await studybridge.auth.me();
   const limits = getContextLimits(profile);
   const filters = course?.id ? { course_id: course.id } : null;
   if (!filters) {
@@ -153,11 +153,11 @@ export async function loadStudyContextBundle({ course, topic }) {
   }
 
   const [topics, materials, notes, sessions, tasks] = await Promise.all([
-    base44.entities.Topic.filter(filters, "order", 100),
-    base44.entities.StudyMaterial.filter(filters, "-created_date", 20),
-    base44.entities.Note.filter(filters, "-created_date", 20),
-    base44.entities.StudySession.filter(filters, "-created_date", 10),
-    base44.entities.Task.filter(filters, "due_date", 20),
+    studybridge.entities.Topic.filter(filters, "order", 100),
+    studybridge.entities.StudyMaterial.filter(filters, "-created_date", 20),
+    studybridge.entities.Note.filter(filters, "-created_date", 20),
+    studybridge.entities.StudySession.filter(filters, "-created_date", 10),
+    studybridge.entities.Task.filter(filters, "due_date", 20),
   ]);
 
   const relevantMaterials = topic?.id ? materials.filter((m) => !m.topic_id || m.topic_id === topic.id) : materials;
@@ -206,15 +206,15 @@ export async function loadStudyContextBundle({ course, topic }) {
 }
 
 export async function loadPlannerContext() {
-  const profile = await base44.auth.me();
+  const profile = await studybridge.auth.me();
   const limits = getContextLimits(profile);
   const [courses, topics, materials, notes, sessions, tasks] = await Promise.all([
-    base44.entities.Course.list("-created_date", 50),
-    base44.entities.Topic.list("order", 300),
-    base44.entities.StudyMaterial.list("-created_date", 100),
-    base44.entities.Note.list("-created_date", 100),
-    base44.entities.StudySession.list("-created_date", 50),
-    base44.entities.Task.list("due_date", 200),
+    studybridge.entities.Course.list("-created_date", 50),
+    studybridge.entities.Topic.list("order", 300),
+    studybridge.entities.StudyMaterial.list("-created_date", 100),
+    studybridge.entities.Note.list("-created_date", 100),
+    studybridge.entities.StudySession.list("-created_date", 50),
+    studybridge.entities.Task.list("due_date", 200),
   ]);
 
   const activeCourses = courses.filter((course) => course.status !== "completed");
@@ -230,12 +230,12 @@ export async function loadPlannerContext() {
 }
 
 export async function loadProgressContext() {
-  const profile = await base44.auth.me();
+  const profile = await studybridge.auth.me();
   const limits = getContextLimits(profile);
   const [courses, topics, sessions] = await Promise.all([
-    base44.entities.Course.list("-created_date", 50),
-    base44.entities.Topic.list("-mastery_level", 200),
-    base44.entities.StudySession.list("-created_date", 50),
+    studybridge.entities.Course.list("-created_date", 50),
+    studybridge.entities.Topic.list("-mastery_level", 200),
+    studybridge.entities.StudySession.list("-created_date", 50),
   ]);
 
   return [

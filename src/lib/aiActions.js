@@ -1,4 +1,4 @@
-import { base44 } from "@/api/base44Client";
+import { studybridge } from "@/api/studybridgeClient";
 import { buildTutorPrompt, loadStudyContextBundle } from "@/lib/aiContext";
 
 const MAX_AGENT_ACTIONS_PER_TURN = 36;
@@ -601,7 +601,7 @@ async function resolveActionTopic({ course, topic, action }) {
   if (!course?.id || !action.topic_title) return topic?.id;
 
   try {
-    const courseTopics = await base44.entities.Topic.filter({ course_id: course.id }, "order", 300);
+    const courseTopics = await studybridge.entities.Topic.filter({ course_id: course.id }, "order", 300);
     const requested = normalizeComparableText(action.topic_title);
     const matched = courseTopics.find((candidate) => normalizeComparableText(candidate.title) === requested)
       || courseTopics.find((candidate) => normalizeComparableText(candidate.title).includes(requested) || requested.includes(normalizeComparableText(candidate.title)));
@@ -620,7 +620,7 @@ async function executeAction(action, { course, topic, sessionId }) {
     if (!action.content && !action.description) {
       return { ok: false, label: "note", message: "Note content was empty." };
     }
-    const note = await base44.entities.Note.create({
+    const note = await studybridge.entities.Note.create({
       course_id: course.id,
       topic_id: topic?.id,
       session_id: sessionId,
@@ -635,7 +635,7 @@ async function executeAction(action, { course, topic, sessionId }) {
     if (!action.title && !action.content) {
       return { ok: false, label: "topic", message: "Topic title was empty." };
     }
-    const topicRow = await base44.entities.Topic.create({
+    const topicRow = await studybridge.entities.Topic.create({
       course_id: course.id,
       title: action.title || action.content,
       description: action.description || action.content || "",
@@ -651,7 +651,7 @@ async function executeAction(action, { course, topic, sessionId }) {
     const dueDate = parseTaskDueDate(action);
     const linkedTopicId = await resolveActionTopic({ course, topic, action });
 
-    const task = await base44.entities.Task.create({
+    const task = await studybridge.entities.Task.create({
       course_id: course.id,
       topic_id: linkedTopicId,
       title: action.title || action.content,
@@ -674,7 +674,7 @@ async function executeAction(action, { course, topic, sessionId }) {
     if (!action.title && !topic?.title && !course?.title) {
       return { ok: false, label: "study guide", message: "Study guide title was empty." };
     }
-    const guide = await base44.entities.StudyGuide.create({
+    const guide = await studybridge.entities.StudyGuide.create({
       course_id: course.id,
       topic_id: topic?.id,
       title: action.title || `${topic?.title || course.title} study guide`,
@@ -692,7 +692,7 @@ async function executeAction(action, { course, topic, sessionId }) {
       return { ok: false, label: "mindmap", message: "Mindmap nodes were empty." };
     }
 
-    const mindmap = await base44.entities.StudyGuide.create({
+    const mindmap = await studybridge.entities.StudyGuide.create({
       course_id: course.id,
       topic_id: topic?.id,
       title: action.title || `${topic?.title || course.title} mind map`,
@@ -709,7 +709,7 @@ async function executeAction(action, { course, topic, sessionId }) {
     if (!action.title && !action.content) {
       return { ok: false, label: "material", message: "Material title was empty." };
     }
-    const material = await base44.entities.StudyMaterial.create({
+    const material = await studybridge.entities.StudyMaterial.create({
       course_id: course.id,
       topic_id: topic?.id,
       title: action.title || "AI-created material reference",
@@ -728,7 +728,7 @@ async function executeAction(action, { course, topic, sessionId }) {
       return { ok: false, label: "quiz", message: "Quiz questions were empty." };
     }
 
-    const quiz = await base44.entities.Quiz.create({
+    const quiz = await studybridge.entities.Quiz.create({
       course_id: course.id,
       topic_id: topic?.id,
       title: action.title || `${topic?.title || course.title} practice quiz`,
@@ -738,7 +738,7 @@ async function executeAction(action, { course, topic, sessionId }) {
     });
 
     for (const [index, question] of questions.entries()) {
-      await base44.entities.QuizQuestion.create({
+      await studybridge.entities.QuizQuestion.create({
         course_id: course.id,
         topic_id: topic?.id,
         quiz_id: quiz.id,
@@ -785,7 +785,7 @@ export async function runStudyAgent({ course, topic, context, contextBundle, dep
   const deterministicResult = await runDeterministicActions({ course, topic, context: groundedContext, studentText, sessionId, sourceIds, approvalRequired });
   if (deterministicResult) return deterministicResult;
 
-  const result = await base44.integrations.Core.InvokeLLM({
+  const result = await studybridge.integrations.Core.InvokeLLM({
     prompt: buildAgentPrompt({ course, topic, context: groundedContext, depth, history, studentText, sourceIds }),
     response_json_schema: actionSchema,
   });
@@ -862,7 +862,7 @@ export async function runStudyTurn(args) {
     return runStudyAgent({ ...args, contextBundle, approvalRequired: true });
   }
 
-  const result = await base44.integrations.Core.InvokeLLM({
+  const result = await studybridge.integrations.Core.InvokeLLM({
     prompt: buildTutorOutputPrompt({ ...args, context: contextBundle.context, sourceIds: contextBundle.sourceIds }),
     response_json_schema: tutorSchema,
   });

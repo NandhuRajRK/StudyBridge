@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { base44 } from "@/api/base44Client";
+import { studybridge } from "@/api/studybridgeClient";
 import { Link, useNavigate } from "react-router-dom";
 import { BookOpen, Clock, TrendingUp, Brain, ArrowRight, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -26,11 +26,11 @@ export default function Dashboard() {
 
   const loadData = async () => {
     const [u, c, t, s, tp] = await Promise.all([
-      base44.auth.me(),
-      base44.entities.Course.filter({ status: "active" }, "-created_date", 10),
-      base44.entities.Task.filter({ status: "todo" }, "due_date", 10),
-      base44.entities.StudySession.list("-created_date", 5),
-      base44.entities.Topic.list("-mastery_level", 50),
+      studybridge.auth.me(),
+      studybridge.entities.Course.filter({ status: "active" }, "-created_date", 10),
+      studybridge.entities.Task.filter({ status: "todo" }, "due_date", 10),
+      studybridge.entities.StudySession.list("-created_date", 5),
+      studybridge.entities.Topic.list("-mastery_level", 50),
     ]);
     setUser(u);
     setCourses(c);

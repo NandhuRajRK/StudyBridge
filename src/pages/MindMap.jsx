@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { base44 } from "@/api/base44Client";
+import { studybridge } from "@/api/studybridgeClient";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -169,7 +169,7 @@ function computeLayout(nodes) {
 export default function MindMap() {
   const { t } = useLocale();
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const [courses, setCourses] = useState([]);
   const [topics, setTopics] = useState([]);
   const [selectedCourseId, setSelectedCourseId] = useState("");
@@ -194,7 +194,7 @@ export default function MindMap() {
 
   useEffect(() => {
     const loadCourses = async () => {
-      const activeCourses = await base44.entities.Course.filter({ status: "active" }, "-created_date", 50);
+      const activeCourses = await studybridge.entities.Course.filter({ status: "active" }, "-created_date", 50);
       setCourses(activeCourses);
       const courseFromQuery = searchParams.get("course");
       if (courseFromQuery && activeCourses.some((course) => course.id === courseFromQuery)) {
@@ -213,8 +213,8 @@ export default function MindMap() {
     const loadMindMap = async () => {
       if (!selectedCourseId) return;
       const [courseTopics, guides] = await Promise.all([
-        base44.entities.Topic.filter({ course_id: selectedCourseId }, "order", 100),
-        base44.entities.StudyGuide.filter({ course_id: selectedCourseId, source: "mindmap" }, "-updated_date", 20),
+        studybridge.entities.Topic.filter({ course_id: selectedCourseId }, "order", 100),
+        studybridge.entities.StudyGuide.filter({ course_id: selectedCourseId, source: "mindmap" }, "-updated_date", 20),
       ]);
 
       setTopics(courseTopics);
@@ -372,7 +372,7 @@ export default function MindMap() {
         title: `${selectedCourse?.title || "Course"} mind map`,
         difficulty: "custom",
         key_concepts: nodes.filter((node) => node.parentId === nodes[0]?.id).map((node) => node.title).slice(0, 12),
-        sections: nodes.map(({ x, y, depth, ...rest }) => ({
+        sections: nodes.map(({ x, y, depth: _depth, ...rest }) => ({
           ...rest,
           x: Number.isFinite(x) ? x : null,
           y: Number.isFinite(y) ? y : null,
@@ -381,8 +381,8 @@ export default function MindMap() {
       };
 
       const saved = record?.id
-        ? await base44.entities.StudyGuide.update(record.id, payload)
-        : await base44.entities.StudyGuide.create(payload);
+        ? await studybridge.entities.StudyGuide.update(record.id, payload)
+        : await studybridge.entities.StudyGuide.create(payload);
       setRecord(saved);
     } finally {
       setSaving(false);
@@ -394,7 +394,7 @@ export default function MindMap() {
     setBuilding(true);
     try {
       const contextBundle = await loadStudyContextBundle({ course: selectedCourse });
-      const result = await base44.integrations.Core.InvokeLLM({
+      const result = await studybridge.integrations.Core.InvokeLLM({
         prompt: `You are helping a student expand a study mind map for "${selectedCourse?.title || "this course"}".
 
 Current focus node: ${selectedNode.title}

@@ -13,7 +13,7 @@ const geminiModel = import.meta.env.VITE_GEMINI_MODEL || "gemini-2.5-flash";
 const openAiModel = import.meta.env.VITE_OPENAI_MODEL || "";
 const anthropicModel = import.meta.env.VITE_ANTHROPIC_MODEL || "claude-sonnet-4-0";
 
-export const supabase = createClient(
+const supabase = createClient(
   supabaseUrl || "https://placeholder.supabase.co",
   supabaseAnonKey || "placeholder-anon-key",
 );
@@ -600,7 +600,7 @@ async function getCurrentUser() {
   };
 }
 
-export const base44 = {
+export const studybridge = {
   entities: Object.fromEntries(
     Object.keys(entityTables).map((entityName) => [entityName, createEntityClient(entityName)]),
   ),

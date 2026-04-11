@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { base44 } from "@/api/base44Client";
+import { studybridge } from "@/api/studybridgeClient";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,7 +53,7 @@ export default function AddTaskDialog({ open, onClose, courses, topics = [], onC
     data.status = "todo";
 
     try {
-      await base44.entities.Task.create(data);
+      await studybridge.entities.Task.create(data);
       resetForm();
       onCreated();
       onClose();

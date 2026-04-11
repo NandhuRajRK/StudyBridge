@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { base44 } from "@/api/base44Client";
+import { studybridge } from "@/api/studybridgeClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -47,7 +47,7 @@ export default function AITutor() {
   useEffect(() => {
     const loadInitialData = async () => {
       const [courseRows, conversationRows] = await Promise.all([
-        base44.entities.Course.filter({ status: "active" }, "-created_date", 50),
+        studybridge.entities.Course.filter({ status: "active" }, "-created_date", 50),
         listAIConversations(),
       ]);
 
@@ -70,7 +70,7 @@ export default function AITutor() {
 
   useEffect(() => {
     if (selectedCourseId) {
-      base44.entities.Topic.filter({ course_id: selectedCourseId }, "order", 100).then(setTopics);
+      studybridge.entities.Topic.filter({ course_id: selectedCourseId }, "order", 100).then(setTopics);
     } else {
       setTopics([]);
       setSelectedTopicId("");
@@ -116,7 +116,7 @@ export default function AITutor() {
 
   const refreshTopicsAfterActions = async (actionResults) => {
     if (selectedCourse?.id && actionResults.some((result) => result.ok && result.label === "topic")) {
-      const updatedTopics = await base44.entities.Topic.filter({ course_id: selectedCourse.id }, "order", 100);
+      const updatedTopics = await studybridge.entities.Topic.filter({ course_id: selectedCourse.id }, "order", 100);
       setTopics(updatedTopics);
     }
   };

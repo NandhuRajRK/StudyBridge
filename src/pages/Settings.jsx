@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { base44 } from "@/api/base44Client";
+import { studybridge } from "@/api/studybridgeClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -116,7 +116,7 @@ export default function Settings() {
   const { setLanguage, t, supportedLanguages } = useLocale();
 
   useEffect(() => {
-    base44.auth.me().then(async u => {
+    studybridge.auth.me().then(async u => {
       setUser(u);
       setForm({
         full_name: u.full_name || "",
@@ -169,7 +169,7 @@ export default function Settings() {
     const hasStoredGoogleKey = Boolean(aiSettings.googleApiKey?.trim() || aiSettings.hasGoogleApiKey);
     const hasStoredOpenAiKey = Boolean(aiSettings.openAiApiKey?.trim() || aiSettings.hasOpenAiApiKey);
     const hasStoredAnthropicKey = Boolean(aiSettings.anthropicApiKey?.trim() || aiSettings.hasAnthropicApiKey);
-    await base44.auth.updateMe({ ...form, notifications, preferred_language: form.preferred_language || "en" });
+    await studybridge.auth.updateMe({ ...form, notifications, preferred_language: form.preferred_language || "en" });
     setLanguage(form.preferred_language || "en");
     if (isDesktop && window.studybridgeDesktop?.setAiSettings) {
       const payload = serializeAiSettings({

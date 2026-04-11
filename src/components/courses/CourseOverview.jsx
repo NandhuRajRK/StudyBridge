@@ -6,7 +6,6 @@ import { formatDistanceToNow } from "date-fns";
 export default function CourseOverview({ course, topics, sessions, materials }) {
   const totalStudyTime = sessions.reduce((sum, s) => sum + (s.duration_minutes || 0), 0);
   const weakTopics = topics.filter(t => t.mastery_level > 0 && t.mastery_level < 40).sort((a, b) => a.mastery_level - b.mastery_level);
-  const strongTopics = topics.filter(t => t.mastery_level >= 70).sort((a, b) => b.mastery_level - a.mastery_level);
 
   return (
     <div className="grid lg:grid-cols-2 gap-6">

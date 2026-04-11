@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { base44 } from "@/api/base44Client";
+import { studybridge } from "@/api/studybridgeClient";
 import { Link } from "react-router-dom";
 import { Plus, BookOpen, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -20,8 +20,8 @@ export default function Courses() {
 
   const loadData = async () => {
     const [c, t] = await Promise.all([
-      base44.entities.Course.list("-created_date", 50),
-      base44.entities.Topic.list("-created_date", 200),
+      studybridge.entities.Course.list("-created_date", 50),
+      studybridge.entities.Topic.list("-created_date", 200),
     ]);
     setCourses(c);
     setTopics(t);

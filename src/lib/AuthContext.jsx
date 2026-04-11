@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { base44 } from "@/api/base44Client";
+import { studybridge } from "@/api/studybridgeClient";
 
 const AuthContext = createContext();
 
@@ -18,7 +18,7 @@ export const AuthProvider = ({ children }) => {
     setAuthError(null);
 
     try {
-      const currentUser = await base44.auth.me();
+      const currentUser = await studybridge.auth.me();
       setUser(currentUser);
       setIsAuthenticated(Boolean(currentUser));
     } catch (error) {
@@ -33,12 +33,12 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = async () => {
-    await base44.auth.logout();
+    await studybridge.auth.logout();
     setUser(null);
     setIsAuthenticated(false);
   };
 
-  const navigateToLogin = () => base44.auth.redirectToLogin();
+  const navigateToLogin = () => studybridge.auth.redirectToLogin();
 
   return (
     <AuthContext.Provider

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { base44 } from "@/api/base44Client";
+import { studybridge } from "@/api/studybridgeClient";
 import { Link } from "react-router-dom";
 import { Progress as ProgressBar } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -21,10 +21,10 @@ export default function Progress() {
 
   useEffect(() => {
     Promise.all([
-      base44.auth.me(),
-      base44.entities.Course.filter({ status: "active" }, "-created_date", 50),
-      base44.entities.Topic.list("-mastery_level", 200),
-      base44.entities.StudySession.list("-created_date", 50),
+      studybridge.auth.me(),
+      studybridge.entities.Course.filter({ status: "active" }, "-created_date", 50),
+      studybridge.entities.Topic.list("-mastery_level", 200),
+      studybridge.entities.StudySession.list("-created_date", 50),
     ]).then(([p, c, t, s]) => {
       setProfile(p);
       setCourses(c);

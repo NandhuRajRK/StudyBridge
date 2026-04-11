@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { base44 } from "@/api/base44Client";
+import { studybridge } from "@/api/studybridgeClient";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,7 +16,7 @@ export default function AddTopicDialog({ open, onClose, courseId, onCreated }) {
     if (!title.trim()) return;
     setSaving(true);
     try {
-      await base44.entities.Topic.create({
+      await studybridge.entities.Topic.create({
         course_id: courseId,
         title: title.trim(),
         description: description.trim(),

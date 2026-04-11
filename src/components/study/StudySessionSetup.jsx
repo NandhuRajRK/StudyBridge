@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { base44 } from "@/api/base44Client";
+import { studybridge } from "@/api/studybridgeClient";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
@@ -14,7 +14,7 @@ export default function StudySessionSetup({ onStart, preselectedCourse, preselec
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    base44.entities.Course.filter({ status: "active" }, "-created_date", 50).then(c => {
+    studybridge.entities.Course.filter({ status: "active" }, "-created_date", 50).then(c => {
       setCourses(c);
       setLoading(false);
     });
@@ -22,7 +22,7 @@ export default function StudySessionSetup({ onStart, preselectedCourse, preselec
 
   useEffect(() => {
     if (selectedCourseId) {
-      base44.entities.Topic.filter({ course_id: selectedCourseId }, "order", 100).then(setTopics);
+      studybridge.entities.Topic.filter({ course_id: selectedCourseId }, "order", 100).then(setTopics);
     } else {
       setTopics([]);
     }

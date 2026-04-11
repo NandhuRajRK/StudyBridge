@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { base44 } from "@/api/base44Client";
+import { studybridge } from "@/api/studybridgeClient";
 import { Link } from "react-router-dom";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
@@ -25,14 +25,14 @@ export default function Library() {
 
   const loadData = async () => {
     const [c, m, g, d, q, qq, n, s] = await Promise.all([
-      base44.entities.Course.list("-created_date", 50),
-      base44.entities.StudyMaterial.list("-created_date", 100),
-      base44.entities.StudyGuide.list("-created_date", 50),
-      base44.entities.FlashcardDeck.list("-created_date", 50),
-      base44.entities.Quiz.list("-created_date", 50),
-      base44.entities.QuizQuestion.list("order", 300),
-      base44.entities.Note.list("-created_date", 100),
-      base44.entities.SavedAIAnswer.list("-created_date", 50),
+      studybridge.entities.Course.list("-created_date", 50),
+      studybridge.entities.StudyMaterial.list("-created_date", 100),
+      studybridge.entities.StudyGuide.list("-created_date", 50),
+      studybridge.entities.FlashcardDeck.list("-created_date", 50),
+      studybridge.entities.Quiz.list("-created_date", 50),
+      studybridge.entities.QuizQuestion.list("order", 300),
+      studybridge.entities.Note.list("-created_date", 100),
+      studybridge.entities.SavedAIAnswer.list("-created_date", 50),
     ]);
 
     setCourses(c);

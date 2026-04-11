@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { base44 } from "@/api/base44Client";
+import { studybridge } from "@/api/studybridgeClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Send, Loader2, Bookmark, Lightbulb } from "lucide-react";
@@ -41,7 +41,7 @@ export default function StudyAIChat({ course, topic, sessionId }) {
     const loadConversation = async () => {
       if (!course?.id || !topic?.id) return;
 
-      const records = await base44.entities.SavedAIAnswer.list("-updated_date", 100);
+      const records = await studybridge.entities.SavedAIAnswer.list("-updated_date", 100);
       const found = records.find((record) => (
         isConversationRecord(record) &&
         record.source === "study_session" &&

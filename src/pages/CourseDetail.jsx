@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { base44 } from "@/api/base44Client";
+import { studybridge } from "@/api/studybridgeClient";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Plus, Upload, Brain, FileText, BookOpen, Trash2, GitBranch } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -31,12 +31,12 @@ export default function CourseDetail() {
 
   const loadData = async () => {
     const [c, tp, m, g, n, s] = await Promise.all([
-      base44.entities.Course.filter({ id }, null, 1).then(r => r[0]),
-      base44.entities.Topic.filter({ course_id: id }, "order", 100),
-      base44.entities.StudyMaterial.filter({ course_id: id }, "-created_date", 50),
-      base44.entities.StudyGuide.filter({ course_id: id }, "-created_date", 20),
-      base44.entities.Note.filter({ course_id: id }, "-created_date", 50),
-      base44.entities.StudySession.filter({ course_id: id }, "-created_date", 10),
+      studybridge.entities.Course.filter({ id }, null, 1).then(r => r[0]),
+      studybridge.entities.Topic.filter({ course_id: id }, "order", 100),
+      studybridge.entities.StudyMaterial.filter({ course_id: id }, "-created_date", 50),
+      studybridge.entities.StudyGuide.filter({ course_id: id }, "-created_date", 20),
+      studybridge.entities.Note.filter({ course_id: id }, "-created_date", 50),
+      studybridge.entities.StudySession.filter({ course_id: id }, "-created_date", 10),
     ]);
     setCourse(c);
     setTopics(tp);

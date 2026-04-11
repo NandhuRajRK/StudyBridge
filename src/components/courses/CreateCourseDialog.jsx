@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { base44 } from "@/api/base44Client";
+import { studybridge } from "@/api/studybridgeClient";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,7 +22,7 @@ export default function CreateCourseDialog({ open, onClose, onCreated }) {
       const data = { ...form };
       if (data.exam_date) data.exam_date = new Date(data.exam_date).toISOString();
       else delete data.exam_date;
-      const created = await base44.entities.Course.create(data);
+      const created = await studybridge.entities.Course.create(data);
       setForm({ title: '', code: '', term: 'Spring 2026', instructor: '', description: '', color: '#3B5BDB', exam_date: '' });
       onCreated(created);
     } catch (error) {

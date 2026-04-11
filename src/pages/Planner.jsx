@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { base44 } from "@/api/base44Client";
+import { studybridge } from "@/api/studybridgeClient";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -51,15 +51,15 @@ export default function Planner() {
 
   const loadData = async () => {
     const [t, c, tp, p] = await Promise.all([
-      base44.entities.Task.list("due_date", 200),
-      base44.entities.Course.filter({ status: "active" }, "-created_date", 50),
-      base44.entities.Topic.list("order", 300),
-      base44.auth.me(),
+      studybridge.entities.Task.list("due_date", 200),
+      studybridge.entities.Course.filter({ status: "active" }, "-created_date", 50),
+      studybridge.entities.Topic.list("order", 300),
+      studybridge.auth.me(),
     ]);
     const [studyMaterials, studyNotes, studySessions] = await Promise.all([
-      base44.entities.StudyMaterial.list("-created_date", 100),
-      base44.entities.Note.list("-created_date", 100),
-      base44.entities.StudySession.list("-created_date", 50),
+      studybridge.entities.StudyMaterial.list("-created_date", 100),
+      studybridge.entities.Note.list("-created_date", 100),
+      studybridge.entities.StudySession.list("-created_date", 50),
     ]);
     setTasks(t);
     setCourses(c);
@@ -82,7 +82,7 @@ export default function Planner() {
       const context = await loadPlannerContext();
       const itemLimit = profile?.planner_item_limit || 8;
 
-      const result = await base44.integrations.Core.InvokeLLM({
+      const result = await studybridge.integrations.Core.InvokeLLM({
         prompt: `You are StudyBridge's planner. Build an actionable 7-day plan from the user's actual study context.
 
 Rules:
@@ -124,7 +124,7 @@ ${context}`,
       for (const task of (result.tasks || []).slice(0, itemLimit)) {
         const course = findCourseByTitle(courses, task.course_title) || courses[0];
         const topic = findTopicByTitle(topics, course?.id, task.topic_title);
-        await base44.entities.Task.create({
+        await studybridge.entities.Task.create({
           title: task.title || (topic ? `Study ${topic.title}` : `Study ${course?.title || "course"}`),
           instructions: task.instructions || "Open the linked study session and work through the topic.",
           outcome: task.outcome || "You can explain the key idea without notes.",
@@ -152,7 +152,7 @@ ${context}`,
 
   const handleToggleTask = async (task) => {
     const newStatus = task.status === "completed" ? "todo" : "completed";
-    await base44.entities.Task.update(task.id, {
+    await studybridge.entities.Task.update(task.id, {
       status: newStatus,
       completed_at: newStatus === "completed" ? new Date().toISOString() : null
     });
