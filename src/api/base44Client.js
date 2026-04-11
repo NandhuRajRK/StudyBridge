@@ -160,6 +160,13 @@ async function waitForLocalRuntime() {
   }
 }
 
+async function invokeDesktopAgentRuntime(payload) {
+  if (!isDesktopRuntime || !window.studybridgeDesktop?.invokeAgentRuntime) {
+    throw new Error("External agent runtime is unavailable.");
+  }
+  return window.studybridgeDesktop.invokeAgentRuntime(payload);
+}
+
 function getDesktopDataBridge() {
   return isDesktopRuntime ? window.studybridgeDesktop : null;
 }
@@ -556,7 +563,22 @@ export const base44 = {
         if (isDesktopRuntime) {
           const desktopRuntime = await getDesktopRuntime();
           const desktopAiSettings = await getDesktopAiSettings();
+          const desktopAgentProvider = [desktopAiSettings?.agentProvider, desktopRuntime?.provider]
+            .find((value) => value && value !== "none") || "";
           const desktopMode = desktopRuntime?.aiMode || desktopAiSettings?.mode || "disabled";
+
+          if (desktopAgentProvider) {
+            if (desktopRuntime?.status === "missing_provider" || desktopRuntime?.status === "error" || desktopRuntime?.status === "disabled") {
+              const error = new Error(desktopRuntime?.error || "External agent provider is unavailable. Open Settings to change it.");
+              error.code = "AI_UNAVAILABLE";
+              throw error;
+            }
+
+            return invokeDesktopAgentRuntime({
+              ...payload,
+              provider: desktopAgentProvider,
+            });
+          }
 
           if (desktopMode === "local") {
             if (desktopRuntime?.status === "error" || desktopRuntime?.status === "disabled") {

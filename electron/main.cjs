@@ -1,6 +1,8 @@
 const { app, BrowserWindow, shell, ipcMain, dialog } = require("electron");
 const path = require("node:path");
+const fs = require("node:fs/promises");
 const { startLocalAi, getHardwarePreset } = require("./local-ai.cjs");
+const { detectAgentProvider, invokeAgentProvider } = require("./agent-adapters.cjs");
 const { DEFAULT_CONFIG, readConfig, writeConfig, mergeConfig } = require("./config.cjs");
 const {
   listRows,
@@ -208,6 +210,24 @@ function stopLocalRuntime() {
 }
 
 async function syncRuntimeFromConfig() {
+  const agentProvider = appConfig.ai?.agentProvider && appConfig.ai.agentProvider !== "none"
+    ? appConfig.ai.agentProvider
+    : "";
+  if (agentProvider) {
+    stopLocalRuntime();
+    const providerStatus = await detectAgentProvider(agentProvider);
+    localAiRuntime = {
+      ...getHardwarePreset(),
+      mode: "agent",
+      provider: agentProvider,
+      status: providerStatus.status === "ready" ? "ready" : (providerStatus.status === "missing" ? "missing_provider" : "error"),
+      error: providerStatus.error || null,
+      details: providerStatus.details || null,
+      url: null,
+    };
+    return localAiRuntime;
+  }
+
   const mode = appConfig.ai?.mode || "disabled";
 
   if (mode === "local" && appConfig.ai?.localModelConsent) {
@@ -364,6 +384,30 @@ ipcMain.handle("studybridge:wait-local-ai", async () => {
   }
 
   return runtimeForRenderer();
+});
+ipcMain.handle("studybridge:invoke-agent-runtime", async (_event, payload = {}) => {
+  const aiConfig = appConfig.ai || {};
+  const provider = typeof payload.provider === "string" && payload.provider.trim() && payload.provider !== "none"
+    ? payload.provider.trim()
+    : (aiConfig.agentProvider && aiConfig.agentProvider !== "none" ? aiConfig.agentProvider : "");
+  if (!provider) {
+    const error = new Error("No external agent provider is selected.");
+    error.code = "AI_UNAVAILABLE";
+    throw error;
+  }
+
+  const prompt = typeof payload.prompt === "string" ? payload.prompt : "";
+  if (!prompt.trim()) {
+    throw new Error("Prompt is empty.");
+  }
+
+  const responseJsonSchema = payload.response_json_schema || null;
+  const cwd = await fs.mkdtemp(path.join(app.getPath("userData"), "agent-runtime-"));
+  return invokeAgentProvider(provider, {
+    prompt,
+    response_json_schema: responseJsonSchema,
+    cwd,
+  });
 });
 ipcMain.handle("studybridge:invoke-google-gemini", async (_event, payload = {}) => {
   const aiConfig = appConfig.ai || {};
