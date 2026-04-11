@@ -8,8 +8,13 @@ const DEFAULT_CONFIG = {
     cloudProvider: "google",
     agentProvider: "none",
     installedAgentProviders: {},
+    authorizedAgentProviders: {},
     googleApiKey: "",
+    openAiApiKey: "",
+    anthropicApiKey: "",
     googleModel: "gemini-2.5-flash",
+    openAiModel: "",
+    anthropicModel: "claude-sonnet-4-0",
     safetyLimits: {
       maxPromptChars: 25000,
       minRequestIntervalMs: 2500,
@@ -56,6 +61,7 @@ function mergeConfig(config = {}) {
   const safetyLimits = config.ai?.safetyLimits || {};
   const cloudBudget = config.ai?.cloudBudget || {};
   const installedAgentProviders = config.ai?.installedAgentProviders || {};
+  const authorizedAgentProviders = config.ai?.authorizedAgentProviders || {};
 
   return {
     ...structuredClone(DEFAULT_CONFIG),
@@ -65,6 +71,9 @@ function mergeConfig(config = {}) {
       ...(config.ai || {}),
       installedAgentProviders: {
         ...installedAgentProviders,
+      },
+      authorizedAgentProviders: {
+        ...authorizedAgentProviders,
       },
       safetyLimits: {
         ...structuredClone(DEFAULT_CONFIG.ai.safetyLimits),

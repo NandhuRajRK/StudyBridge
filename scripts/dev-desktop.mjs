@@ -11,10 +11,16 @@ const electronBinary = process.platform === "win32"
 const devServerUrl = "http://127.0.0.1:5173";
 
 function spawnProcess(command, args, options = {}) {
+  const env = {
+    ...process.env,
+    ...(options.env || {}),
+  };
+  delete env.ELECTRON_RUN_AS_NODE;
   return spawn(command, args, {
     stdio: "inherit",
     shell: false,
     ...options,
+    env,
   });
 }
 

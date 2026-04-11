@@ -20,7 +20,7 @@ const sections = [
   },
   {
     title: "4. AI modes",
-    body: "Desktop users can run local Gemma through llama.cpp, bring a Google API key, or install a CLI orchestrator such as Gemini CLI, OpenCode, Claude Code, or Codex CLI on demand.",
+    body: "Desktop users can use Codex CLI for OpenAI-backed generation without storing an OpenAI key in StudyBridge. Local Gemma through llama.cpp and Google, OpenAI, or Anthropic API keys remain optional fallback modes.",
   },
   {
     title: "5. Exports",

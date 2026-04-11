@@ -55,7 +55,7 @@ export default function MaterialUploader({ open, onClose, courseId, topics, onUp
 
       const [course] = await base44.entities.Course.filter({ id: courseId }, null, 1);
       const selectedTopic = topics.find(t => t.id === topicId);
-      const fallbackSummary = `Uploaded material saved for ${course?.title || "this course"}${selectedTopic?.title ? ` and linked to ${selectedTopic.title}` : ""}. AI summary is unavailable until you enable local Gemma or add a Google API key.`;
+      const fallbackSummary = `Uploaded material saved for ${course?.title || "this course"}${selectedTopic?.title ? ` and linked to ${selectedTopic.title}` : ""}. AI summary is unavailable until you enable local Gemma or add a cloud API key.`;
 
       // Process with AI to extract summary and topics
       let summary = {

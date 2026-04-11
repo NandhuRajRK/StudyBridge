@@ -1,12 +1,18 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
+contextBridge.exposeInMainWorld("appAI", {
+  invoke: (prompt) => ipcRenderer.invoke("codex:invoke", { prompt }),
+  status: () => ipcRenderer.invoke("codex:status"),
+  login: () => ipcRenderer.invoke("codex:login"),
+  install: () => ipcRenderer.invoke("codex:install"),
+});
+
 contextBridge.exposeInMainWorld("studybridgeDesktop", {
   getRuntimeConfig: () => ipcRenderer.invoke("studybridge:get-runtime-config"),
   getAiSettings: () => ipcRenderer.invoke("studybridge:get-ai-settings"),
   setAiSettings: (payload) => ipcRenderer.invoke("studybridge:set-ai-settings", payload),
   waitForLocalAi: () => ipcRenderer.invoke("studybridge:wait-local-ai"),
-  invokeAgentRuntime: (payload) => ipcRenderer.invoke("studybridge:invoke-agent-runtime", payload),
-  installAgentProvider: (provider) => ipcRenderer.invoke("studybridge:install-agent-provider", provider),
+  invokeCloudProvider: (payload) => ipcRenderer.invoke("studybridge:invoke-cloud-provider", payload),
   invokeGoogleGemini: (payload) => ipcRenderer.invoke("studybridge:invoke-google-gemini", payload),
   getLocalProfile: () => ipcRenderer.invoke("studybridge:get-local-profile"),
   updateLocalProfile: (payload) => ipcRenderer.invoke("studybridge:update-local-profile", payload),

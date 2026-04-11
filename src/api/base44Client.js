@@ -10,6 +10,8 @@ const ollamaModel = import.meta.env.VITE_OLLAMA_MODEL || "gemma4:e2b";
 const llamaCppUrl = import.meta.env.VITE_LLAMACPP_URL || "http://127.0.0.1:8080";
 const llamaCppModel = import.meta.env.VITE_LLAMACPP_MODEL || "ggml-org/gemma-4-E2B-it-GGUF:Q8_0";
 const geminiModel = import.meta.env.VITE_GEMINI_MODEL || "gemini-2.5-flash";
+const openAiModel = import.meta.env.VITE_OPENAI_MODEL || "";
+const anthropicModel = import.meta.env.VITE_ANTHROPIC_MODEL || "claude-sonnet-4-0";
 
 export const supabase = createClient(
   supabaseUrl || "https://placeholder.supabase.co",
@@ -164,11 +166,20 @@ async function waitForLocalRuntime() {
   }
 }
 
-async function invokeDesktopAgentRuntime(payload) {
-  if (!isDesktopRuntime || !window.studybridgeDesktop?.invokeAgentRuntime) {
-    throw new Error("External agent runtime is unavailable.");
+async function invokeDesktopCodex(payload) {
+  if (!isDesktopRuntime || !window.appAI?.invoke) {
+    throw new Error("Codex CLI runtime is unavailable.");
   }
-  return window.studybridgeDesktop.invokeAgentRuntime(payload);
+  const prompt = `${payload.prompt || ""}${buildSchemaHint(payload.response_json_schema)}`;
+  const text = await window.appAI.invoke(prompt);
+  return payload.response_json_schema ? extractJson(text) : text;
+}
+
+async function invokeDesktopCloudProvider(payload) {
+  if (!isDesktopRuntime || !window.studybridgeDesktop?.invokeCloudProvider) {
+    throw new Error("Cloud AI runtime is unavailable.");
+  }
+  return window.studybridgeDesktop.invokeCloudProvider(payload);
 }
 
 function getDesktopDataBridge() {
@@ -306,8 +317,9 @@ async function invokeLocalLlamaCpp({ prompt, response_json_schema, model = llama
 }
 
 async function invokeGoogleGemini({ prompt, response_json_schema, apiKey, model = geminiModel }) {
-  if (isDesktopRuntime && window.studybridgeDesktop?.invokeGoogleGemini) {
-    return window.studybridgeDesktop.invokeGoogleGemini({
+  if (isDesktopRuntime && window.studybridgeDesktop?.invokeCloudProvider) {
+    return invokeDesktopCloudProvider({
+      provider: "google",
       prompt,
       response_json_schema,
       model,
@@ -315,7 +327,7 @@ async function invokeGoogleGemini({ prompt, response_json_schema, apiKey, model 
   }
 
   if (!apiKey) {
-    const error = new Error("AI is disabled. Open Settings to download Gemma locally or add a Google API key.");
+    const error = new Error("AI is disabled. Open Settings to download Gemma locally or add a cloud API key.");
     error.code = "AI_UNAVAILABLE";
     throw error;
   }
@@ -350,6 +362,111 @@ async function invokeGoogleGemini({ prompt, response_json_schema, apiKey, model 
 
   const data = await response.json();
   const text = data?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("") || "";
+  return response_json_schema ? extractJson(text) : text;
+}
+
+async function invokeOpenAi({ prompt, response_json_schema, apiKey, model = openAiModel }) {
+  if (isDesktopRuntime && window.studybridgeDesktop?.invokeCloudProvider) {
+    return invokeDesktopCloudProvider({
+      provider: "openai",
+      prompt,
+      response_json_schema,
+      model,
+    });
+  }
+
+  if (!apiKey) {
+    const error = new Error("OpenAI API key missing. Open Settings to add your key.");
+    error.code = "AI_UNAVAILABLE";
+    throw error;
+  }
+
+  if (!model) {
+    throw new Error("OpenAI model missing. Use Codex CLI for default-profile OpenAI access, or explicitly configure an API model.");
+  }
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are StudyBridge's cloud tutor. Help students learn clearly, avoid hallucinating, and return valid JSON whenever a JSON schema is requested.",
+        },
+        {
+          role: "user",
+          content: `${prompt}${buildSchemaHint(response_json_schema)}`,
+        },
+      ],
+      temperature: response_json_schema ? 0.15 : 0.35,
+      top_p: 0.9,
+      max_tokens: response_json_schema ? 2048 : 1024,
+      ...(response_json_schema ? { response_format: { type: "json_object" } } : {}),
+    }),
+  });
+
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`OpenAI request failed: ${response.status} ${details}`);
+  }
+
+  const data = await response.json();
+  const text = data?.choices?.[0]?.message?.content ?? "";
+  return response_json_schema ? extractJson(text) : text;
+}
+
+async function invokeAnthropic({ prompt, response_json_schema, apiKey, model = anthropicModel }) {
+  if (isDesktopRuntime && window.studybridgeDesktop?.invokeCloudProvider) {
+    return invokeDesktopCloudProvider({
+      provider: "anthropic",
+      prompt,
+      response_json_schema,
+      model,
+    });
+  }
+
+  if (!apiKey) {
+    const error = new Error("Anthropic API key missing. Open Settings to add your key.");
+    error.code = "AI_UNAVAILABLE";
+    throw error;
+  }
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: response_json_schema ? 2048 : 1024,
+      temperature: response_json_schema ? 0.15 : 0.35,
+      top_p: 0.9,
+      system:
+        "You are StudyBridge's cloud tutor. Help students learn clearly, avoid hallucinating, and return valid JSON whenever a JSON schema is requested.",
+      messages: [
+        {
+          role: "user",
+          content: `${prompt}${buildSchemaHint(response_json_schema)}`,
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`Anthropic request failed: ${response.status} ${details}`);
+  }
+
+  const data = await response.json();
+  const text = data?.content?.map((part) => part.text || "").join("") ?? "";
   return response_json_schema ? extractJson(text) : text;
 }
 
@@ -567,34 +684,26 @@ export const base44 = {
         if (isDesktopRuntime) {
           const desktopRuntime = await getDesktopRuntime();
           const desktopAiSettings = await getDesktopAiSettings();
-          const desktopAgentProvider = [desktopAiSettings?.agentProvider, desktopRuntime?.provider]
-            .find((value) => value && value !== "none") || "";
           const desktopMode = desktopRuntime?.aiMode || desktopAiSettings?.mode || "disabled";
-
-          if (desktopAgentProvider) {
-            if (desktopRuntime?.status === "missing_provider" || desktopRuntime?.status === "error" || desktopRuntime?.status === "disabled") {
-              const error = new Error(desktopRuntime?.error || "External agent provider is unavailable. Open Settings to change it.");
-              error.code = "AI_UNAVAILABLE";
-              throw error;
-            }
-
-            return invokeDesktopAgentRuntime({
-              ...payload,
-              provider: desktopAgentProvider,
-              model: desktopAiSettings?.googleModel || geminiModel,
-            });
+          if (desktopMode === "codex") {
+            return invokeDesktopCodex(payload);
           }
+
+          const desktopCloudProvider = desktopAiSettings?.cloudProvider || desktopRuntime?.cloudProvider || "google";
+          const desktopCloudModel = desktopAiSettings?.[`${desktopCloudProvider === "google" ? "googleModel" : desktopCloudProvider === "openai" ? "openAiModel" : "anthropicModel"}`]
+            || desktopRuntime?.cloudModel
+            || (desktopCloudProvider === "google" ? geminiModel : desktopCloudProvider === "openai" ? "" : anthropicModel);
 
           if (desktopMode === "local") {
             if (desktopRuntime?.status === "error" || desktopRuntime?.status === "disabled") {
-              const error = new Error("AI is disabled. Open Settings to download Gemma locally or add a Google API key.");
+              const error = new Error("AI is disabled. Open Settings to download Gemma locally or add a cloud API key.");
               error.code = "AI_UNAVAILABLE";
               throw error;
             }
 
             const runtimeAfterWait = await waitForLocalRuntime();
             if (runtimeAfterWait?.status === "error" || runtimeAfterWait?.status === "disabled") {
-              const error = new Error(runtimeAfterWait.error || "AI is disabled. Open Settings to download Gemma locally or add a Google API key.");
+              const error = new Error(runtimeAfterWait.error || "AI is disabled. Open Settings to download Gemma locally or add a cloud API key.");
               error.code = "AI_UNAVAILABLE";
               throw error;
             }
@@ -605,14 +714,36 @@ export const base44 = {
           }
 
           if (desktopMode === "cloud") {
+            const desktopCloudKey = desktopCloudProvider === "openai"
+              ? desktopAiSettings?.openAiApiKey
+              : desktopCloudProvider === "anthropic"
+                ? desktopAiSettings?.anthropicApiKey
+                : desktopAiSettings?.googleApiKey;
+
+            if (desktopCloudProvider === "openai") {
+              return invokeOpenAi({
+                ...payload,
+                apiKey: desktopCloudKey,
+                model: desktopCloudModel,
+              });
+            }
+
+            if (desktopCloudProvider === "anthropic") {
+              return invokeAnthropic({
+                ...payload,
+                apiKey: desktopCloudKey,
+                model: desktopCloudModel,
+              });
+            }
+
             return invokeGoogleGemini({
               ...payload,
-              apiKey: desktopAiSettings?.googleApiKey,
-              model: desktopAiSettings?.googleModel || geminiModel,
+              apiKey: desktopCloudKey,
+              model: desktopCloudModel,
             });
           }
 
-          const error = new Error("AI is disabled. Open Settings to download Gemma locally or add a Google API key.");
+          const error = new Error("AI is disabled. Open Settings to connect Codex CLI, download Gemma locally, or add a cloud API key.");
           error.code = "AI_UNAVAILABLE";
           throw error;
         }

@@ -1,18 +1,107 @@
 const fs = require("node:fs/promises");
+const fsSync = require("node:fs");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
+const os = require("node:os");
+
+function unique(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function getPathKey(env) {
+  return Object.keys(env).find((key) => key.toLowerCase() === "path") || "PATH";
+}
+
+function getCommonCliDirs(env) {
+  const home = os.homedir();
+
+  if (process.platform === "win32") {
+    return unique([
+      env.APPDATA && path.join(env.APPDATA, "npm"),
+      env.LOCALAPPDATA && path.join(env.LOCALAPPDATA, "Volta", "bin"),
+      env.ProgramFiles && path.join(env.ProgramFiles, "nodejs"),
+      env["ProgramFiles(x86)"] && path.join(env["ProgramFiles(x86)"], "nodejs"),
+    ]);
+  }
+
+  return unique([
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/usr/bin",
+    home && path.join(home, ".npm-global", "bin"),
+    home && path.join(home, ".local", "bin"),
+    home && path.join(home, ".bun", "bin"),
+    home && path.join(home, ".volta", "bin"),
+  ]);
+}
+
+function createAgentEnv(env = {}) {
+  const childEnv = {
+    ...process.env,
+    ...env,
+  };
+  delete childEnv.ELECTRON_RUN_AS_NODE;
+  const pathKey = getPathKey(childEnv);
+  const pathEntries = (childEnv[pathKey] || "").split(path.delimiter);
+  childEnv[pathKey] = unique([...pathEntries, ...getCommonCliDirs(childEnv)]).join(path.delimiter);
+  return childEnv;
+}
+
+function shouldUseWindowsShell(command) {
+  return process.platform === "win32" && (path.extname(command).toLowerCase() !== ".exe" || !path.isAbsolute(command));
+}
+
+function getCodexExecutableNames() {
+  return process.platform === "win32" ? ["codex.cmd", "codex.exe", "codex.bat", "codex"] : ["codex"];
+}
+
+function fileExists(filePath) {
+  try {
+    return fsSync.existsSync(filePath);
+  } catch {
+    return false;
+  }
+}
+
+function getCodexCommandCandidates() {
+  const env = createAgentEnv();
+  const pathKey = getPathKey(env);
+  const pathDirs = unique((env[pathKey] || "").split(path.delimiter));
+  const absoluteCandidates = pathDirs.flatMap((dir) =>
+    getCodexExecutableNames()
+      .map((name) => path.join(dir, name))
+      .filter(fileExists),
+  );
+
+  return unique(["codex", ...getCodexExecutableNames(), ...absoluteCandidates]);
+}
+
+async function resolveCodexCommand() {
+  for (const command of getCodexCommandCandidates()) {
+    try {
+      const { stdout, stderr } = await runCommand(command, ["--version"], { timeoutMs: 15000 });
+      return { ok: true, command, version: stdout.trim() || stderr.trim() };
+    } catch {
+      // try next candidate
+    }
+  }
+
+  return {
+    ok: false,
+    command: "codex",
+    version: "",
+    error: "Codex CLI was not found on PATH or in common install locations.",
+  };
+}
 
 function runCommand(command, args, { cwd, input, timeoutMs = 10 * 60 * 1000, env = {} } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd,
-      shell: process.platform === "win32",
+      shell: shouldUseWindowsShell(command),
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        ...env,
-      },
+      env: createAgentEnv(env),
     });
 
     let stdout = "";
@@ -106,16 +195,20 @@ function parseCodexJsonStream(stdout) {
 
 function getProviderCommand(provider) {
   if (provider === "claude-code") {
-    return { command: "claude", availableArgs: ["--version"] };
+    return { command: "claude", availableArgs: ["--version"], authCommand: "claude" };
   }
   if (provider === "codex-cli") {
-    return { command: "codex", availableArgs: ["--version"] };
+    return {
+      command: "codex",
+      availableArgs: ["--version"],
+      authCommand: "codex login",
+    };
   }
   if (provider === "opencode-cli") {
-    return { command: "opencode", availableArgs: ["--version"] };
+    return { command: "opencode", availableArgs: ["--version"], authCommand: "opencode auth login" };
   }
   if (provider === "gemini-cli") {
-    return { command: "gemini", availableArgs: ["--version"] };
+    return { command: "gemini", availableArgs: ["--version"], authCommand: "gemini" };
   }
   return null;
 }
@@ -127,6 +220,14 @@ async function detectAgentProvider(provider) {
   }
 
   try {
+    if (provider === "codex-cli") {
+      const resolved = await resolveCodexCommand();
+      if (!resolved.ok) {
+        throw new Error(resolved.error);
+      }
+      return { provider, status: "ready", error: null, command: resolved.command, version: resolved.version };
+    }
+
     await runCommand(descriptor.command, descriptor.availableArgs, { timeoutMs: 15000 });
     return { provider, status: "ready", error: null };
   } catch (error) {
@@ -205,19 +306,31 @@ async function invokeAgentProvider(provider, { prompt, response_json_schema, cwd
   }
 
   if (provider === "codex-cli") {
+    const resolved = await resolveCodexCommand();
+    if (!resolved.ok) {
+      throw new Error(resolved.error);
+    }
     const { stdout } = await runCommand(
-      "codex",
+      resolved.command,
       [
         "exec",
-        "--json",
+        "-m",
+        "gpt-5.1-codex-mini",
         "--skip-git-repo-check",
-        "--full-auto",
-        userPrompt,
+        "--sandbox",
+        "read-only",
+        "--color",
+        "never",
+        "-",
       ],
-      { cwd: workspaceDir, timeoutMs: 20 * 60 * 1000 },
+      {
+        cwd: workspaceDir,
+        timeoutMs: 20 * 60 * 1000,
+        input: `${prompt}${buildSchemaHint(response_json_schema)}\n`,
+      },
     );
 
-    const text = parseCodexJsonStream(stdout);
+    const text = stdout.trim();
     return response_json_schema ? extractJson(text) : text;
   }
 
@@ -292,8 +405,27 @@ async function installAgentProvider(provider) {
   });
 }
 
+function getAgentProviderAuthCommand(provider) {
+  return getProviderCommand(provider)?.authCommand || "";
+}
+
+function getAgentProviderInstallCommand(provider) {
+  if (provider === "claude-code") return "npm install -g @anthropic-ai/claude-code";
+  if (provider === "codex-cli") {
+    if (process.platform === "win32") {
+      return 'npm install -g @openai/codex && "%APPDATA%\\npm\\codex.cmd" login';
+    }
+    return "npm install -g @openai/codex && codex login";
+  }
+  if (provider === "opencode-cli") return "npm install -g opencode-ai";
+  if (provider === "gemini-cli") return "npm install -g @google/gemini-cli";
+  return "";
+}
+
 module.exports = {
   detectAgentProvider,
   invokeAgentProvider,
   installAgentProvider,
+  getAgentProviderAuthCommand,
+  getAgentProviderInstallCommand,
 };

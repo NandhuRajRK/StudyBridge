@@ -17,7 +17,7 @@ The app is built for:
 - Library for materials, notes, saved answers, guides, and chats
 - Mind map creation, editing, and export
 - Desktop local AI with `llama.cpp`
-- Optional BYOK cloud AI with a Google API key
+- Optional BYOK cloud AI with Google, OpenAI, or Anthropic API keys
 - Optional CLI orchestrators for advanced agent workflows
 
 ## How It Works
@@ -97,7 +97,7 @@ If Windows packaging fails with symlink privilege errors, run the terminal as Ad
 StudyBridge supports three main AI paths:
 
 - Local Gemma through `llama.cpp`
-- Google API key BYOK mode
+- Google, OpenAI, or Anthropic API key BYOK mode
 - Optional CLI orchestrators for background agent workflows
 
 When AI is not configured, the app does not guess. It points the user back to Settings.

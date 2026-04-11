@@ -1,8 +1,10 @@
 const { app, BrowserWindow, shell, ipcMain, dialog } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs/promises");
+const fsSync = require("node:fs");
+const os = require("node:os");
+const { spawn } = require("node:child_process");
 const { startLocalAi, getHardwarePreset } = require("./local-ai.cjs");
-const { detectAgentProvider, installAgentProvider, invokeAgentProvider } = require("./agent-adapters.cjs");
 const { DEFAULT_CONFIG, readConfig, writeConfig, mergeConfig } = require("./config.cjs");
 const {
   listRows,
@@ -17,6 +19,8 @@ const {
 } = require("./local-store.cjs");
 
 const devServerUrl = process.env.ELECTRON_START_URL;
+const appIconPath = path.join(process.cwd(), "public", "studybridge.png");
+const codexModel = "gpt-5.1-codex-mini";
 let mainWindow = null;
 let appConfig = mergeConfig(DEFAULT_CONFIG);
 let localAiRuntime = {
@@ -27,6 +31,237 @@ let localAiRuntime = {
   ...getHardwarePreset(),
 };
 let localAiPromise = null;
+let codexLastRequestAt = 0;
+
+function spawnEnv(extraEnv = {}) {
+  const nextEnv = {
+    ...process.env,
+    ...extraEnv,
+  };
+  delete nextEnv.ELECTRON_RUN_AS_NODE;
+  const pathKey = getPathKey(nextEnv);
+  const pathEntries = (nextEnv[pathKey] || "").split(path.delimiter);
+  nextEnv[pathKey] = unique([...pathEntries, ...getCommonCliDirs(nextEnv)]).join(path.delimiter);
+  return nextEnv;
+}
+
+function unique(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function getPathKey(env) {
+  return Object.keys(env).find((key) => key.toLowerCase() === "path") || "PATH";
+}
+
+function getCommonCliDirs(env) {
+  const home = os.homedir();
+
+  if (process.platform === "win32") {
+    return unique([
+      env.APPDATA && path.join(env.APPDATA, "npm"),
+      env.LOCALAPPDATA && path.join(env.LOCALAPPDATA, "Volta", "bin"),
+      env.ProgramFiles && path.join(env.ProgramFiles, "nodejs"),
+      env["ProgramFiles(x86)"] && path.join(env["ProgramFiles(x86)"], "nodejs"),
+    ]);
+  }
+
+  return unique([
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/usr/bin",
+    home && path.join(home, ".npm-global", "bin"),
+    home && path.join(home, ".local", "bin"),
+    home && path.join(home, ".bun", "bin"),
+    home && path.join(home, ".volta", "bin"),
+  ]);
+}
+
+function commandForPath(command) {
+  if (process.platform === "win32" && command === "npm") {
+    return `${command}.cmd`;
+  }
+  return command;
+}
+
+function shouldUseWindowsShell(command) {
+  return process.platform === "win32" && (path.extname(command).toLowerCase() !== ".exe" || !path.isAbsolute(command));
+}
+
+function getCodexExecutableNames() {
+  return process.platform === "win32" ? ["codex.cmd", "codex.exe", "codex.bat", "codex"] : ["codex"];
+}
+
+function fileExists(filePath) {
+  try {
+    return fsSync.existsSync(filePath);
+  } catch {
+    return false;
+  }
+}
+
+function getCodexCommandCandidates() {
+  const env = spawnEnv();
+  const pathKey = getPathKey(env);
+  const pathDirs = unique((env[pathKey] || "").split(path.delimiter));
+  const absoluteCandidates = pathDirs.flatMap((dir) =>
+    getCodexExecutableNames()
+      .map((name) => path.join(dir, name))
+      .filter(fileExists),
+  );
+
+  return unique(["codex", ...getCodexExecutableNames(), ...absoluteCandidates]);
+}
+
+async function resolveCodexCommand() {
+  for (const command of getCodexCommandCandidates()) {
+    try {
+      const { stdout, stderr } = await runBufferedCommand(command, ["--version"], {
+        timeoutMs: 15000,
+      });
+      return {
+        ok: true,
+        command,
+        version: stdout.trim() || stderr.trim(),
+      };
+    } catch {
+      // try next candidate
+    }
+  }
+
+  return {
+    ok: false,
+    command: "codex",
+    version: "",
+    error: "Codex CLI was not found on PATH or in common install locations.",
+  };
+}
+
+function quoteTerminalCommand(command) {
+  if (!command.includes(" ")) {
+    return command;
+  }
+
+  if (process.platform === "win32") {
+    return `"${command.replace(/"/g, '""')}"`;
+  }
+
+  return `'${command.replace(/'/g, "'\\''")}'`;
+}
+
+function getCodexInstallCommand() {
+  if (process.platform === "win32") {
+    return 'npm install -g @openai/codex && "%APPDATA%\\npm\\codex.cmd" login';
+  }
+
+  return "npm install -g @openai/codex && codex login";
+}
+
+function launchRawTerminalCommand(command, title = "StudyBridge Codex Setup") {
+  if (!command) {
+    throw new Error("Unsupported terminal command request.");
+  }
+
+  if (process.platform === "win32") {
+    const child = spawn("cmd.exe", ["/c", "start", title.replace(/"/g, ""), "cmd.exe", "/k", command], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: false,
+      env: spawnEnv(),
+    });
+    child.unref();
+    return { launched: true };
+  }
+
+  if (process.platform === "darwin") {
+    const child = spawn("osascript", ["-e", `tell application "Terminal" to do script ${JSON.stringify(command)}`], {
+      detached: true,
+      stdio: "ignore",
+      env: spawnEnv(),
+    });
+    child.unref();
+    return { launched: true };
+  }
+
+  const child = spawn("sh", ["-lc", `x-terminal-emulator -e ${JSON.stringify(command)} || gnome-terminal -- ${JSON.stringify(command)} || konsole -e ${JSON.stringify(command)}`], {
+    detached: true,
+    stdio: "ignore",
+    env: spawnEnv(),
+  });
+  child.unref();
+  return { launched: true };
+}
+
+function runBufferedCommand(command, args = [], { input = "", timeoutMs = 10 * 60 * 1000, cwd } = {}) {
+  return new Promise((resolve, reject) => {
+    const resolvedCommand = commandForPath(command);
+    const child = spawn(resolvedCommand, args, {
+      cwd,
+      shell: shouldUseWindowsShell(resolvedCommand),
+      windowsHide: true,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: spawnEnv(),
+    });
+
+    let stdout = "";
+    let stderr = "";
+    let finished = false;
+    const timer = setTimeout(() => {
+      if (finished) return;
+      finished = true;
+      child.kill();
+      const error = new Error(`Command timed out after ${Math.round(timeoutMs / 1000)}s.`);
+      error.stderr = stderr;
+      error.stdout = stdout;
+      reject(error);
+    }, timeoutMs);
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString("utf8");
+    });
+
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+    });
+
+    child.on("error", (error) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      error.stderr = stderr;
+      error.stdout = stdout;
+      reject(error);
+    });
+
+    child.on("exit", (code) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      if (code === 0) {
+        resolve({ stdout, stderr, code });
+        return;
+      }
+
+      const error = new Error(stderr.trim() || stdout.trim() || `Command exited with code ${code}`);
+      error.stderr = stderr;
+      error.stdout = stdout;
+      error.code = code;
+      reject(error);
+    });
+
+    if (input) {
+      child.stdin.write(input);
+    }
+    child.stdin.end();
+  });
+}
+
+async function runCodex(args = [], options = {}) {
+  const status = await resolveCodexCommand();
+  if (!status.ok) {
+    throw new Error(status.error);
+  }
+  return runBufferedCommand(status.command, args, options);
+}
 
 function getTodayKey() {
   return new Date().toISOString().slice(0, 10);
@@ -77,6 +312,109 @@ function normalizeCloudBudget(aiConfig = {}) {
   };
 }
 
+function getCloudProviderLabel(provider) {
+  if (provider === "google") return "Google";
+  if (provider === "openai") return "OpenAI";
+  if (provider === "anthropic") return "Anthropic";
+  return "Cloud";
+}
+
+function getCloudProviderKey(aiConfig = {}, provider = aiConfig.cloudProvider || "google") {
+  if (provider === "openai") return aiConfig.openAiApiKey || "";
+  if (provider === "anthropic") return aiConfig.anthropicApiKey || "";
+  return aiConfig.googleApiKey || "";
+}
+
+function getCloudProviderModel(aiConfig = {}, provider = aiConfig.cloudProvider || "google") {
+  if (provider === "openai") return aiConfig.openAiModel || "";
+  if (provider === "anthropic") return aiConfig.anthropicModel || "claude-sonnet-4-0";
+  return aiConfig.googleModel || "gemini-2.5-flash";
+}
+
+function getAgentProviderAuthLabel(provider) {
+  if (provider === "codex-cli") return "Codex CLI";
+  return "AI provider";
+}
+
+async function launchTerminalCommand(provider, command, titleSuffix) {
+  if (!command) {
+    throw new Error("Unsupported provider command request.");
+  }
+
+  const label = getAgentProviderAuthLabel(provider);
+  const terminalDir = path.join(app.getPath("userData"), "provider-auth");
+  await fs.mkdir(terminalDir, { recursive: true });
+  const isWindows = process.platform === "win32";
+  const isMac = process.platform === "darwin";
+  const scriptPath = path.join(
+    terminalDir,
+    `${provider}-${titleSuffix}${isWindows ? ".cmd" : isMac ? ".command" : ".sh"}`,
+  );
+  const script = isWindows
+    ? [
+        "@echo off",
+        `cd /d "${app.getPath("userData")}"`,
+        `echo StudyBridge: ${label} ${titleSuffix}`,
+        "echo.",
+        `echo Running: ${command}`,
+        "echo.",
+        `${command}`,
+        "echo.",
+        "echo Return to StudyBridge when finished.",
+        "pause",
+        "",
+      ].join("\r\n")
+    : [
+        "#!/bin/bash",
+        `cd "${app.getPath("userData")}"`,
+        `echo "StudyBridge: ${label} ${titleSuffix}"`,
+        "echo",
+        `echo "Running: ${command}"`,
+        "echo",
+        `${command}`,
+        "echo",
+        "echo \"Return to StudyBridge when finished.\"",
+        "read -n 1 -s -r -p \"Press any key to close this window...\"",
+        "",
+      ].join("\n");
+
+  await fs.writeFile(scriptPath, script, "utf8");
+
+  if (process.platform === "win32") {
+    const safeTitle = `StudyBridge ${label} ${titleSuffix}`.replace(/"/g, "");
+    const safeScriptPath = scriptPath.replace(/"/g, '""');
+    const commandLine = `start "${safeTitle}" cmd.exe /k "${safeScriptPath}"`;
+    const child = spawn("cmd.exe", ["/c", commandLine], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: false,
+      env: spawnEnv(),
+    });
+    child.unref();
+    return { provider, scriptPath, launched: true };
+  }
+
+  if (process.platform === "darwin") {
+    await fs.chmod(scriptPath, 0o755);
+    const child = spawn("open", ["-a", "Terminal", scriptPath], {
+      detached: true,
+      stdio: "ignore",
+      env: spawnEnv(),
+    });
+    child.unref();
+    return { provider, scriptPath, launched: true };
+  }
+
+  await fs.chmod(scriptPath, 0o755);
+  const child = spawn("x-terminal-emulator", ["-e", "bash", scriptPath], {
+    detached: true,
+    stdio: "ignore",
+    env: spawnEnv(),
+  });
+  child.unref();
+  return { provider, scriptPath, launched: true };
+}
+
 function getCloudBudgetState() {
   const aiConfig = appConfig.ai || {};
   const usage = normalizeCloudUsage(aiConfig);
@@ -122,7 +460,14 @@ function setCloudUsage(nextUsage) {
 
 function getSafeAiSettings() {
   const ai = appConfig.ai || {};
-  const { googleApiKey: _googleApiKey, cloudUsage, rateLimits, ...rest } = ai;
+  const {
+    googleApiKey: _googleApiKey,
+    openAiApiKey: _openAiApiKey,
+    anthropicApiKey: _anthropicApiKey,
+    cloudUsage,
+    rateLimits,
+    ...rest
+  } = ai;
   const usage = normalizeCloudUsage(ai);
   const limits = normalizeCloudBudget(ai);
   const safetyLimits = normalizeSafetyLimits(ai);
@@ -131,7 +476,10 @@ function getSafeAiSettings() {
   return {
     ...rest,
     hasGoogleApiKey: Boolean(ai.googleApiKey),
+    hasOpenAiApiKey: Boolean(ai.openAiApiKey),
+    hasAnthropicApiKey: Boolean(ai.anthropicApiKey),
     installedAgentProviders: ai.installedAgentProviders || {},
+    authorizedAgentProviders: ai.authorizedAgentProviders || {},
     cloudUsage: usage,
     rateLimits: limits,
     safetyLimits,
@@ -151,6 +499,8 @@ function createWindow() {
     minHeight: 800,
     title: "StudyBridge",
     backgroundColor: "#ffffff",
+    icon: appIconPath,
+    autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -175,6 +525,9 @@ function createWindow() {
     event.preventDefault();
   });
 
+  mainWindow.setMenuBarVisibility(false);
+  mainWindow.setMenu(null);
+
   if (devServerUrl) {
     mainWindow.loadURL(devServerUrl);
     mainWindow.webContents.openDevTools({ mode: "detach" });
@@ -191,13 +544,21 @@ function createWindow() {
 function runtimeForRenderer() {
   const budget = getCloudBudgetState();
   const safetyLimits = normalizeSafetyLimits(appConfig.ai || {});
+  const cloudProvider = appConfig.ai?.cloudProvider || "google";
   return {
     ...localAiRuntime,
     aiMode: appConfig.ai?.mode || "disabled",
     localModelConsent: Boolean(appConfig.ai?.localModelConsent),
-    cloudProvider: appConfig.ai?.cloudProvider || "google",
+    cloudProvider,
+    cloudModel: getCloudProviderModel(appConfig.ai || {}, cloudProvider),
     googleModel: appConfig.ai?.googleModel || "gemini-2.5-flash",
+    openAiModel: appConfig.ai?.openAiModel || "",
+    anthropicModel: appConfig.ai?.anthropicModel || "claude-sonnet-4-0",
     hasGoogleApiKey: Boolean(appConfig.ai?.googleApiKey),
+    hasOpenAiApiKey: Boolean(appConfig.ai?.openAiApiKey),
+    hasAnthropicApiKey: Boolean(appConfig.ai?.anthropicApiKey),
+    installedAgentProviders: appConfig.ai?.installedAgentProviders || {},
+    authorizedAgentProviders: appConfig.ai?.authorizedAgentProviders || {},
     cloudBudget: budget,
     safetyLimits,
   };
@@ -211,25 +572,37 @@ function stopLocalRuntime() {
 }
 
 async function syncRuntimeFromConfig() {
-  const agentProvider = appConfig.ai?.agentProvider && appConfig.ai.agentProvider !== "none"
-    ? appConfig.ai.agentProvider
-    : "";
-  if (agentProvider) {
+  const mode = appConfig.ai?.mode || "disabled";
+
+  if (mode === "codex") {
     stopLocalRuntime();
-    const providerStatus = await detectAgentProvider(agentProvider);
-    localAiRuntime = {
-      ...getHardwarePreset(),
-      mode: "agent",
-      provider: agentProvider,
-      status: providerStatus.status === "ready" ? "ready" : (providerStatus.status === "missing" ? "missing_provider" : "error"),
-      error: providerStatus.error || null,
-      details: providerStatus.details || null,
-      url: null,
-    };
+    try {
+      const status = await resolveCodexCommand();
+      if (!status.ok) {
+        throw new Error(status.error);
+      }
+      localAiRuntime = {
+        ...getHardwarePreset(),
+        mode: "codex",
+        provider: "codex-cli",
+        status: "ready",
+        error: null,
+        details: status.version,
+        url: null,
+      };
+    } catch (error) {
+      localAiRuntime = {
+        ...getHardwarePreset(),
+        mode: "codex",
+        provider: "codex-cli",
+        status: "missing_provider",
+        error: "Codex CLI was not found on PATH.",
+        details: error.message || String(error),
+        url: null,
+      };
+    }
     return localAiRuntime;
   }
-
-  const mode = appConfig.ai?.mode || "disabled";
 
   if (mode === "local" && appConfig.ai?.localModelConsent) {
     stopLocalRuntime();
@@ -270,7 +643,7 @@ async function syncRuntimeFromConfig() {
       ...getHardwarePreset(),
       mode: "ask",
       status: "awaiting_choice",
-      error: "Choose local Gemma or add a Google API key in Settings.",
+      error: "Choose local Gemma or add a cloud API key in Settings.",
       url: null,
     };
     return localAiRuntime;
@@ -278,13 +651,17 @@ async function syncRuntimeFromConfig() {
 
   if (mode === "cloud") {
     const budget = getCloudBudgetState();
+    const cloudProvider = appConfig.ai?.cloudProvider || "google";
+    const cloudKey = getCloudProviderKey(appConfig.ai || {}, cloudProvider);
     localAiRuntime = {
       ...getHardwarePreset(),
       mode: "cloud",
-      status: appConfig.ai?.googleApiKey ? (budget.isLimited ? "rate_limited" : "ready") : "missing_key",
-      error: appConfig.ai?.googleApiKey
+      provider: cloudProvider,
+      model: getCloudProviderModel(appConfig.ai || {}, cloudProvider),
+      status: cloudKey ? (budget.isLimited ? "rate_limited" : "ready") : "missing_key",
+      error: cloudKey
         ? (budget.isLimited ? "Cloud AI budget reached. Open Settings to review limits or wait for the daily reset." : null)
-        : "Google API key missing. Open Settings to add your key.",
+        : `${getCloudProviderLabel(cloudProvider)} API key missing. Open Settings to add your key.`,
       url: null,
     };
     return localAiRuntime;
@@ -294,7 +671,7 @@ async function syncRuntimeFromConfig() {
     ...getHardwarePreset(),
     mode: "disabled",
     status: "disabled",
-    error: "AI is disabled. Open Settings to download Gemma locally or add a Google API key.",
+    error: "AI is disabled. Open Settings to download Gemma locally or add a cloud API key.",
     url: null,
   };
   return localAiRuntime;
@@ -304,15 +681,15 @@ async function promptForAiSetup() {
   const response = await dialog.showMessageBox({
     type: "question",
     buttons: [
+      "Use Codex CLI",
       "Download local Gemma model",
-      "Use Google API key",
       "Not now",
     ],
     defaultId: 0,
     cancelId: 2,
     title: "StudyBridge AI setup",
     message: "Choose how you want AI to work in StudyBridge.",
-    detail: "Local Gemma runs offline through llama.cpp. If you prefer cloud AI, you can add a Google API key later in Settings.",
+    detail: "Codex CLI uses your local Codex login and does not store an OpenAI API key in this app. Local Gemma remains available for offline use.",
     noLink: true,
   });
 
@@ -321,14 +698,27 @@ async function promptForAiSetup() {
 
 async function initializeAiMode() {
   appConfig = await readConfig(app);
+  if (appConfig.ai?.agentProvider && appConfig.ai.agentProvider !== "none") {
+    if (appConfig.ai.agentProvider === "codex-cli") {
+      appConfig.ai.mode = "codex";
+    }
+    appConfig.ai.agentProvider = "none";
+    appConfig = await writeConfig(app, appConfig);
+  }
+  if (appConfig.ai?.mode === "agent") {
+    appConfig.ai.mode = "codex";
+    appConfig.ai.agentProvider = "none";
+    appConfig = await writeConfig(app, appConfig);
+  }
 
   if (!appConfig.ai || appConfig.ai.mode === "ask") {
     const choice = await promptForAiSetup();
     if (choice === 0) {
+      appConfig.ai.mode = "codex";
+      appConfig.ai.agentProvider = "none";
+    } else if (choice === 1) {
       appConfig.ai.mode = "local";
       appConfig.ai.localModelConsent = true;
-    } else if (choice === 1) {
-      appConfig.ai.mode = "cloud";
     } else {
       appConfig.ai.mode = "disabled";
     }
@@ -340,6 +730,57 @@ async function initializeAiMode() {
 }
 
 ipcMain.handle("studybridge:get-runtime-config", () => runtimeForRenderer());
+ipcMain.handle("codex:invoke", async (_event, payload = {}) => {
+  const prompt = typeof payload === "string" ? payload : payload.prompt;
+  const promptText = typeof prompt === "string" ? prompt : String(prompt || "");
+  if (!promptText.trim()) {
+    throw new Error("Prompt is empty.");
+  }
+
+  const safety = normalizeSafetyLimits(appConfig.ai || {});
+  if (promptText.length > safety.maxPromptChars) {
+    throw new Error(`Prompt is too large. Safety limit is ${safety.maxPromptChars} characters.`);
+  }
+
+  const now = Date.now();
+  if (codexLastRequestAt && now - codexLastRequestAt < safety.minRequestIntervalMs) {
+    throw new Error("You're sending requests too quickly. Wait a moment and try again.");
+  }
+
+  try {
+    const { stdout } = await runCodex(
+      ["exec", "-m", codexModel, "--skip-git-repo-check", "--sandbox", "read-only", "--color", "never", "-"],
+      {
+        input: promptText,
+        cwd: app.getPath("userData"),
+        timeoutMs: 20 * 60 * 1000,
+      },
+    );
+    codexLastRequestAt = Date.now();
+    return stdout;
+  } catch (error) {
+    const message = [
+      error.message || "Codex CLI failed.",
+      error.stderr ? `stderr:\n${error.stderr.trim()}` : "",
+      error.stdout ? `stdout:\n${error.stdout.trim()}` : "",
+    ].filter(Boolean).join("\n\n");
+    throw new Error(message);
+  }
+});
+ipcMain.handle("codex:status", async () => {
+  const status = await resolveCodexCommand();
+  return {
+    installed: status.ok,
+    version: status.version,
+    command: status.ok ? status.command : "",
+    error: status.ok ? null : status.error,
+  };
+});
+ipcMain.handle("codex:login", async () => {
+  const status = await resolveCodexCommand();
+  return launchRawTerminalCommand(`${quoteTerminalCommand(status.ok ? status.command : "codex")} login`, "StudyBridge Codex Login");
+});
+ipcMain.handle("codex:install", () => launchRawTerminalCommand(getCodexInstallCommand(), "StudyBridge Codex Install"));
 ipcMain.handle("studybridge:get-ai-settings", () => getSafeAiSettings());
 ipcMain.handle("studybridge:set-ai-settings", async (_event, nextAiSettings) => {
   const current = appConfig.ai || {};
@@ -348,13 +789,23 @@ ipcMain.handle("studybridge:set-ai-settings", async (_event, nextAiSettings) => 
     ...(nextAiSettings || {}),
   };
 
-  if (!Object.prototype.hasOwnProperty.call(nextAiSettings || {}, "googleApiKey")) {
-    next.googleApiKey = current.googleApiKey || "";
-  } else if (nextAiSettings?.clearGoogleApiKey) {
-    next.googleApiKey = "";
-  } else if (!nextAiSettings?.googleApiKey && current.googleApiKey) {
-    next.googleApiKey = current.googleApiKey;
-  }
+  const syncKey = (field, clearFlag) => {
+    if (!Object.prototype.hasOwnProperty.call(nextAiSettings || {}, field)) {
+      next[field] = current[field] || "";
+      return;
+    }
+    if (nextAiSettings?.[clearFlag]) {
+      next[field] = "";
+      return;
+    }
+    if (!nextAiSettings?.[field] && current[field]) {
+      next[field] = current[field];
+    }
+  };
+
+  syncKey("googleApiKey", "clearGoogleApiKey");
+  syncKey("openAiApiKey", "clearOpenAiApiKey");
+  syncKey("anthropicApiKey", "clearAnthropicApiKey");
 
   if (!Object.prototype.hasOwnProperty.call(nextAiSettings || {}, "cloudUsage")) {
     next.cloudUsage = normalizeCloudUsage(current);
@@ -386,68 +837,12 @@ ipcMain.handle("studybridge:wait-local-ai", async () => {
 
   return runtimeForRenderer();
 });
-ipcMain.handle("studybridge:invoke-agent-runtime", async (_event, payload = {}) => {
+async function invokeCloudProvider(payload = {}) {
   const aiConfig = appConfig.ai || {};
-  const provider = typeof payload.provider === "string" && payload.provider.trim() && payload.provider !== "none"
+  const provider = typeof payload.provider === "string" && payload.provider.trim()
     ? payload.provider.trim()
-    : (aiConfig.agentProvider && aiConfig.agentProvider !== "none" ? aiConfig.agentProvider : "");
-  if (!provider) {
-    const error = new Error("No external agent provider is selected.");
-    error.code = "AI_UNAVAILABLE";
-    throw error;
-  }
-
-  const prompt = typeof payload.prompt === "string" ? payload.prompt : "";
-  if (!prompt.trim()) {
-    throw new Error("Prompt is empty.");
-  }
-
-  const responseJsonSchema = payload.response_json_schema || null;
-  const model = typeof payload.model === "string" && payload.model.trim()
-    ? payload.model.trim()
-    : (aiConfig.googleModel || "");
-  const cwd = await fs.mkdtemp(path.join(app.getPath("userData"), "agent-runtime-"));
-  return invokeAgentProvider(provider, {
-    prompt,
-    response_json_schema: responseJsonSchema,
-    cwd,
-    model,
-  });
-});
-ipcMain.handle("studybridge:install-agent-provider", async (_event, provider) => {
-  if (!provider || provider === "none") {
-    throw new Error("No external agent provider selected.");
-  }
-
-  const result = await installAgentProvider(provider);
-  const nextInstalledProviders = {
-    ...(appConfig.ai?.installedAgentProviders || {}),
-    [provider]: {
-      installed: true,
-      installedAt: new Date().toISOString(),
-    },
-  };
-  appConfig = await writeConfig(app, {
-    ...appConfig,
-    ai: {
-      ...appConfig.ai,
-      installedAgentProviders: nextInstalledProviders,
-    },
-  });
-  if (appConfig.ai?.agentProvider === provider) {
-    await syncRuntimeFromConfig();
-  }
-
-  return {
-    provider,
-    installedAgentProviders: nextInstalledProviders,
-    ...result,
-    runtime: runtimeForRenderer(),
-  };
-});
-ipcMain.handle("studybridge:invoke-google-gemini", async (_event, payload = {}) => {
-  const aiConfig = appConfig.ai || {};
-  const apiKey = aiConfig.googleApiKey;
+    : (aiConfig.cloudProvider || "google");
+  const apiKey = getCloudProviderKey(aiConfig, provider);
   const safety = normalizeSafetyLimits(aiConfig);
   const budgetLimits = normalizeCloudBudget(aiConfig);
   const usage = normalizeCloudUsage(aiConfig);
@@ -455,10 +850,10 @@ ipcMain.handle("studybridge:invoke-google-gemini", async (_event, payload = {}) 
   const responseJsonSchema = payload.response_json_schema || null;
   const model = typeof payload.model === "string" && payload.model.trim()
     ? payload.model.trim()
-    : (aiConfig.googleModel || "gemini-2.5-flash");
+    : getCloudProviderModel(aiConfig, provider);
 
   if (!apiKey) {
-    const error = new Error("Google API key missing. Open Settings to add your key.");
+    const error = new Error(`${getCloudProviderLabel(provider)} API key missing. Open Settings to add your key.`);
     error.code = "AI_UNAVAILABLE";
     throw error;
   }
@@ -497,46 +892,133 @@ ipcMain.handle("studybridge:invoke-google-gemini", async (_event, payload = {}) 
     return `\n\nReturn ONLY valid JSON. Match this schema as closely as possible:\n${JSON.stringify(schema, null, 2)}`;
   };
 
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              text: `${prompt}${buildSchemaHint(responseJsonSchema)}`,
-            },
-          ],
-        },
-      ],
-      generationConfig: {
-        temperature: responseJsonSchema ? 0.15 : 0.35,
-        topP: 0.9,
-        maxOutputTokens: responseJsonSchema ? 2048 : 1024,
-        ...(responseJsonSchema ? { responseMimeType: "application/json" } : {}),
+  let text = "";
+  if (provider === "openai") {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
       },
-    }),
-  });
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: "system",
+            content: "You are StudyBridge's cloud tutor. Help students learn clearly, avoid hallucinating, and return valid JSON whenever a JSON schema is requested.",
+          },
+          {
+            role: "user",
+            content: `${prompt}${buildSchemaHint(responseJsonSchema)}`,
+          },
+        ],
+        temperature: responseJsonSchema ? 0.15 : 0.35,
+        top_p: 0.9,
+        max_tokens: responseJsonSchema ? 2048 : 1024,
+        ...(responseJsonSchema ? { response_format: { type: "json_object" } } : {}),
+      }),
+    });
 
-  const rawText = await response.text();
-  if (!response.ok) {
-    const error = new Error(`Google AI request failed: ${response.status} ${rawText}`);
-    error.code = "AI_REQUEST_FAILED";
-    throw error;
+    const rawText = await response.text();
+    if (!response.ok) {
+      const error = new Error(`OpenAI request failed: ${response.status} ${rawText}`);
+      error.code = "AI_REQUEST_FAILED";
+      throw error;
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(rawText);
+    } catch (error) {
+      const parseError = new Error(`OpenAI returned invalid JSON: ${error.message}`);
+      parseError.code = "AI_REQUEST_FAILED";
+      throw parseError;
+    }
+
+    text = parsed?.choices?.[0]?.message?.content || "";
+  } else if (provider === "anthropic") {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: responseJsonSchema ? 2048 : 1024,
+        temperature: responseJsonSchema ? 0.15 : 0.35,
+        top_p: 0.9,
+        system: "You are StudyBridge's cloud tutor. Help students learn clearly, avoid hallucinating, and return valid JSON whenever a JSON schema is requested.",
+        messages: [
+          {
+            role: "user",
+            content: `${prompt}${buildSchemaHint(responseJsonSchema)}`,
+          },
+        ],
+      }),
+    });
+
+    const rawText = await response.text();
+    if (!response.ok) {
+      const error = new Error(`Anthropic request failed: ${response.status} ${rawText}`);
+      error.code = "AI_REQUEST_FAILED";
+      throw error;
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(rawText);
+    } catch (error) {
+      const parseError = new Error(`Anthropic returned invalid JSON: ${error.message}`);
+      parseError.code = "AI_REQUEST_FAILED";
+      throw parseError;
+    }
+
+    text = parsed?.content?.map((part) => part.text || "").join("") || "";
+  } else {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts: [
+              {
+                text: `${prompt}${buildSchemaHint(responseJsonSchema)}`,
+              },
+            ],
+          },
+        ],
+        generationConfig: {
+          temperature: responseJsonSchema ? 0.15 : 0.35,
+          topP: 0.9,
+          maxOutputTokens: responseJsonSchema ? 2048 : 1024,
+          ...(responseJsonSchema ? { responseMimeType: "application/json" } : {}),
+        },
+      }),
+    });
+
+    const rawText = await response.text();
+    if (!response.ok) {
+      const error = new Error(`Google AI request failed: ${response.status} ${rawText}`);
+      error.code = "AI_REQUEST_FAILED";
+      throw error;
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(rawText);
+    } catch (error) {
+      const parseError = new Error(`Google AI returned invalid JSON: ${error.message}`);
+      parseError.code = "AI_REQUEST_FAILED";
+      throw parseError;
+    }
+
+    text = parsed?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("") || "";
   }
 
-  let parsed;
-  try {
-    parsed = JSON.parse(rawText);
-  } catch (error) {
-    const parseError = new Error(`Google AI returned invalid JSON: ${error.message}`);
-    parseError.code = "AI_REQUEST_FAILED";
-    throw parseError;
-  }
-
-  const text = parsed?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("") || "";
   const nextUsage = {
     windowStart: usage.windowStart || getTodayKey(),
     requestCount: usage.requestCount + 1,
@@ -556,7 +1038,9 @@ ipcMain.handle("studybridge:invoke-google-gemini", async (_event, payload = {}) 
   } catch {
     return text;
   }
-});
+}
+ipcMain.handle("studybridge:invoke-cloud-provider", async (_event, payload = {}) => invokeCloudProvider(payload));
+ipcMain.handle("studybridge:invoke-google-gemini", async (_event, payload = {}) => invokeCloudProvider({ ...payload, provider: "google" }));
 ipcMain.handle("studybridge:get-local-profile", async () => getProfile(app));
 ipcMain.handle("studybridge:update-local-profile", async (_event, payload) => updateProfile(app, payload));
 ipcMain.handle("studybridge:reset-local-profile", async () => resetProfile(app));

@@ -139,7 +139,7 @@ Return as JSON with this structure:
       const isAiUnavailable = error?.code === "AI_UNAVAILABLE" || /AI is disabled/i.test(error?.message || "");
       setGeneratedContent({
         summary: isAiUnavailable
-          ? "AI is not configured on this desktop yet. Open Settings to download the local Gemma model or add a Google API key, then restart the study content generator."
+          ? "AI is not configured on this desktop yet. Open Settings to download the local Gemma model or add a cloud API key, then restart the study content generator."
           : `Study content generation failed: ${error.message || "Unknown local model error."}`,
         flashcards: [],
         quiz: [],
