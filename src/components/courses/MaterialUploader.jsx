@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Upload, FileText, Loader2 } from "lucide-react";
+import { buildMaterialChunks, extractUploadText, normalizeText } from "@/lib/materialText";
 
 export default function MaterialUploader({ open, onClose, courseId, topics, onUploaded }) {
   const [file, setFile] = useState(null);
@@ -29,6 +30,9 @@ export default function MaterialUploader({ open, onClose, courseId, topics, onUp
     try {
       // Upload file
       const { file_url } = await base44.integrations.Core.UploadFile({ file });
+      const extractedText = await extractUploadText(file);
+      const chunks = buildMaterialChunks(extractedText, { maxChunks: 8 });
+      const excerpt = normalizeText(extractedText).slice(0, 2000);
       
       // Create material record
       const material = await base44.entities.StudyMaterial.create({
@@ -40,6 +44,10 @@ export default function MaterialUploader({ open, onClose, courseId, topics, onUp
         file_name: file.name,
         file_size: file.size,
         status: 'uploaded',
+        source_text: extractedText,
+        content_excerpt: excerpt,
+        content_chunks: chunks,
+        chunk_count: chunks.length,
       });
 
       setUploading(false);
@@ -57,15 +65,17 @@ export default function MaterialUploader({ open, onClose, courseId, topics, onUp
 
       try {
         summary = await base44.integrations.Core.InvokeLLM({
-          prompt: `You are analyzing metadata for a StudyBridge upload. You cannot read the file contents yet, so do not pretend you did.
+          prompt: `You are analyzing an uploaded StudyBridge material. You may use the extracted text below when present, but do not claim to have seen any file structure beyond what is explicitly provided.
 
 Course: ${course?.title || "Unknown"} ${course?.code ? `(${course.code})` : ""}
 Selected topic: ${selectedTopic?.title || "None"}
 Material title: ${title}
 File name: ${file.name}
 Material type: ${type}
+Extracted text excerpt:
+${excerpt || "No extracted text available."}
 
-Based only on this metadata, generate a cautious 2-3 sentence summary and likely key topics. Return as JSON.`,
+Based on the metadata and excerpt, generate a cautious 2-3 sentence summary and likely key topics. If the excerpt is empty, fall back to metadata only. Return as JSON.`,
           response_json_schema: {
             type: "object",
             properties: {
@@ -84,6 +94,10 @@ Based only on this metadata, generate a cautious 2-3 sentence summary and likely
         status: 'processed',
         summary: summary.summary,
         extracted_topics: summary.extracted_topics,
+        source_text: extractedText,
+        content_excerpt: excerpt,
+        content_chunks: chunks,
+        chunk_count: chunks.length,
       });
 
       setFile(null);

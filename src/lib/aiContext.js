@@ -1,4 +1,5 @@
 import { base44 } from "@/api/base44Client";
+import { buildMaterialChunks, rankChunks, normalizeText } from "@/lib/materialText";
 
 const truncate = (value, max = 700) => {
   if (!value) return "";
@@ -100,6 +101,39 @@ function groupCourseBundle({ course, topics, materials, notes, sessions, tasks, 
   ].filter(Boolean).join("\n\n");
 }
 
+function buildMaterialPassages(materials = [], { course, topic, limits }) {
+  const terms = [
+    course?.title,
+    course?.code,
+    topic?.title,
+    topic?.description,
+    topic?.keywords?.join?.(", "),
+  ].flatMap((value) => String(value || "").split(",")).map((item) => normalizeText(item)).filter(Boolean);
+
+  const passageLimit = Math.max(1, Math.min(6, limits.material_limit || 3));
+  const passages = [];
+
+  materials.forEach((material, materialIndex) => {
+    const storedChunks = Array.isArray(material.content_chunks) && material.content_chunks.length > 0
+      ? material.content_chunks
+      : (material.source_text ? buildMaterialChunks(material.source_text, { maxChunks: 6 }) : []);
+    const ranked = rankChunks(storedChunks.map((chunk) => chunk.text || chunk), terms).slice(0, 2);
+
+    ranked.forEach((chunk, chunkIndex) => {
+      passages.push({
+        id: `material-${materialIndex + 1}-passage-${chunkIndex + 1}`,
+        materialTitle: material.title || "Untitled material",
+        text: chunk.text,
+        score: chunk.score,
+      });
+    });
+  });
+
+  return passages
+    .sort((a, b) => b.score - a.score)
+    .slice(0, passageLimit);
+}
+
 export async function loadProfileContext() {
   const profile = await base44.auth.me();
   return buildProfileContext(profile);
@@ -129,12 +163,14 @@ export async function loadStudyContextBundle({ course, topic }) {
   const relevantMaterials = topic?.id ? materials.filter((m) => !m.topic_id || m.topic_id === topic.id) : materials;
   const relevantNotes = topic?.id ? notes.filter((n) => !n.topic_id || n.topic_id === topic.id) : notes;
   const relevantSessions = topic?.id ? sessions.filter((s) => !s.topic_id || s.topic_id === topic.id) : sessions;
+  const relevantPassages = buildMaterialPassages(relevantMaterials.slice(0, limits.material_limit), { course, topic, limits });
   const sourceIds = ["profile", "course", "current-topic", "exam", "topics", "materials", "notes", "sessions", "tasks"];
   topics.slice(0, limits.topic_limit).forEach((_, index) => sourceIds.push(makeSourceId("topic", index)));
   relevantMaterials.slice(0, limits.material_limit).forEach((_, index) => sourceIds.push(makeSourceId("material", index)));
   relevantNotes.slice(0, limits.note_limit).forEach((_, index) => sourceIds.push(makeSourceId("note", index)));
   relevantSessions.slice(0, limits.session_limit).forEach((_, index) => sourceIds.push(makeSourceId("session", index)));
   tasks.filter((t) => t.status !== "completed").slice(0, limits.task_limit).forEach((_, index) => sourceIds.push(makeSourceId("task", index)));
+  relevantPassages.forEach((passage) => sourceIds.push(passage.id));
 
   const sections = [
     `[profile] ${buildProfileContext(profile)}`,
@@ -148,6 +184,9 @@ export async function loadStudyContextBundle({ course, topic }) {
     relevantMaterials.length > 0
       ? `[materials] Study materials:\n${relevantMaterials.slice(0, limits.material_limit).map((m, index) => `- [${makeSourceId("material", index)}] ${m.title} [${m.type || "material"}]: ${truncate(m.summary || m.extracted_topics?.join(", "), 280)}`).join("\n")}`
       : "[materials] Study materials: none yet",
+    relevantPassages.length > 0
+      ? `[passages] Relevant material passages:\n${relevantPassages.map((p) => `- [${p.id}] ${p.materialTitle}: ${truncate(p.text, 320)}`).join("\n")}`
+      : "[passages] Relevant material passages: none yet",
     relevantNotes.length > 0
       ? `[notes] Student notes:\n${relevantNotes.slice(0, limits.note_limit).map((n, index) => `- [${makeSourceId("note", index)}] ${n.title || "Untitled"}: ${truncate(n.content, 260)}`).join("\n")}`
       : "[notes] Student notes: none yet",

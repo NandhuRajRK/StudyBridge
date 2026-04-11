@@ -56,6 +56,10 @@ const entityDefaults = {
     status: "uploaded",
     type: "pdf",
     extracted_topics: [],
+    source_text: "",
+    content_excerpt: "",
+    content_chunks: [],
+    chunk_count: 0,
   },
   StudySession: {
     status: "active",
