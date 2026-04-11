@@ -1,0 +1,94 @@
+{
+  "name": "Flashcard",
+  "type": "object",
+  "properties": {
+    "deck_id": {
+      "type": "string"
+    },
+    "course_id": {
+      "type": "string"
+    },
+    "topic_id": {
+      "type": "string"
+    },
+    "front": {
+      "type": "string",
+      "description": "Question/prompt side"
+    },
+    "back": {
+      "type": "string",
+      "description": "Answer side"
+    },
+    "difficulty": {
+      "type": "string",
+      "enum": [
+        "easy",
+        "medium",
+        "hard"
+      ],
+      "default": "medium"
+    },
+    "times_reviewed": {
+      "type": "number",
+      "default": 0
+    },
+    "times_correct": {
+      "type": "number",
+      "default": 0
+    },
+    "mastered": {
+      "type": "boolean",
+      "default": false
+    },
+    "last_reviewed": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "deck_id",
+    "front",
+    "back"
+  ],
+  "rls": {
+    "create": {
+      "created_by": "{{user.email}}"
+    },
+    "read": {
+      "$or": [
+        {
+          "created_by": "{{user.email}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "update": {
+      "$or": [
+        {
+          "created_by": "{{user.email}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "created_by": "{{user.email}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}

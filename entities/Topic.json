@@ -1,0 +1,52 @@
+{
+  "name": "Topic",
+  "type": "object",
+  "properties": {
+    "course_id": {
+      "type": "string",
+      "description": "Reference to Course"
+    },
+    "title": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "order": {
+      "type": "number",
+      "default": 0
+    },
+    "mastery_level": {
+      "type": "number",
+      "default": 0,
+      "description": "0-100"
+    },
+    "confidence": {
+      "type": "number",
+      "default": 0,
+      "description": "0-5 self-rated"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "not_started",
+        "in_progress",
+        "mastered"
+      ],
+      "default": "not_started"
+    },
+    "total_study_time": {
+      "type": "number",
+      "default": 0,
+      "description": "Minutes studied"
+    },
+    "last_studied": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "course_id",
+    "title"
+  ]
+}

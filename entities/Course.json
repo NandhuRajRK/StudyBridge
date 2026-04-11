@@ -1,0 +1,100 @@
+{
+  "name": "Course",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Course name"
+    },
+    "code": {
+      "type": "string",
+      "description": "Course code e.g. CS101"
+    },
+    "term": {
+      "type": "string",
+      "description": "Academic term e.g. Spring 2026"
+    },
+    "instructor": {
+      "type": "string"
+    },
+    "color": {
+      "type": "string",
+      "description": "Hex color for course branding",
+      "default": "#3B5BDB"
+    },
+    "exam_date": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Final exam date"
+    },
+    "description": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "completed",
+        "archived"
+      ],
+      "default": "active"
+    },
+    "total_topics": {
+      "type": "number",
+      "default": 0
+    },
+    "mastered_topics": {
+      "type": "number",
+      "default": 0
+    },
+    "overall_progress": {
+      "type": "number",
+      "default": 0,
+      "description": "0-100 percentage"
+    }
+  },
+  "required": [
+    "title"
+  ],
+  "rls": {
+    "create": {
+      "created_by": "{{user.email}}"
+    },
+    "read": {
+      "$or": [
+        {
+          "created_by": "{{user.email}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "update": {
+      "$or": [
+        {
+          "created_by": "{{user.email}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "created_by": "{{user.email}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}

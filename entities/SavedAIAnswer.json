@@ -1,0 +1,30 @@
+{
+  "name": "SavedAIAnswer",
+  "type": "object",
+  "properties": {
+    "course_id": {
+      "type": "string"
+    },
+    "topic_id": {
+      "type": "string"
+    },
+    "question": {
+      "type": "string"
+    },
+    "answer": {
+      "type": "string"
+    },
+    "context": {
+      "type": "string",
+      "description": "What material/topic this was about"
+    },
+    "rating": {
+      "type": "number",
+      "description": "1-5 helpfulness"
+    }
+  },
+  "required": [
+    "question",
+    "answer"
+  ]
+}

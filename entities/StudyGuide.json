@@ -1,0 +1,45 @@
+{
+  "name": "StudyGuide",
+  "type": "object",
+  "properties": {
+    "course_id": {
+      "type": "string"
+    },
+    "topic_id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "content": {
+      "type": "string",
+      "description": "Markdown content of the guide"
+    },
+    "difficulty": {
+      "type": "string",
+      "enum": [
+        "beginner",
+        "intermediate",
+        "advanced"
+      ],
+      "default": "intermediate"
+    },
+    "key_concepts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "source_material_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "course_id",
+    "title",
+    "content"
+  ]
+}
