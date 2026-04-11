@@ -5,12 +5,13 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Send, Loader2, Bot, Bookmark, BookOpen, HelpCircle, List, Zap, Layers, History, Plus } from "lucide-react";
 import { loadStudyContextBundle } from "@/lib/aiContext";
-import { runStudyTurn } from "@/lib/aiActions";
+import { executeStudyActions, runStudyTurn } from "@/lib/aiActions";
 import { listAIConversations, loadAIConversation, saveAIAnswer, saveAIConversation } from "@/lib/aiConversations";
 import AiAccessNotice from "@/components/ai/AiAccessNotice";
 import { getDesktopAiNotice, isDesktopAiUnavailable, loadDesktopAiRuntime } from "@/lib/desktopAi";
 import MarkdownContent from "@/components/ui/markdown-content";
 import { useLocale } from "@/lib/locale";
+import PendingActionsCard from "@/components/ai/PendingActionsCard";
 
 const ACTIONS = [
   { icon: BookOpen, label: "Explain concept", prompt: "Explain the key concepts of this topic clearly" },
@@ -36,6 +37,7 @@ export default function AITutor() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [pendingActions, setPendingActions] = useState([]);
   const [depth, setDepth] = useState("intermediate");
   const [runtime, setRuntime] = useState(null);
   const scrollRef = useRef(null);
@@ -93,6 +95,7 @@ export default function AITutor() {
     setMessages(conversation.messages || []);
     setSelectedCourseId(conversation.course_id || "");
     setSelectedTopicId(conversation.topic_id || "");
+    setPendingActions([]);
     window.history.replaceState(null, "", `/ai-tutor?conversation=${conversation.id}`);
   };
 
@@ -105,6 +108,7 @@ export default function AITutor() {
     setActiveConversation(null);
     setMessages([]);
     setInput("");
+    setPendingActions([]);
     window.history.replaceState(null, "", "/ai-tutor");
   };
 
@@ -122,7 +126,7 @@ export default function AITutor() {
 
     try {
       const contextBundle = await loadStudyContextBundle({ course: selectedCourse, topic: selectedTopic });
-      const { reply, actionResults } = await runStudyTurn({
+      const turnResult = await runStudyTurn({
         course: selectedCourse,
         topic: selectedTopic,
         contextBundle,
@@ -130,6 +134,7 @@ export default function AITutor() {
         history: historyBeforeTurn,
         studentText: userMessage.content,
       });
+      const { reply, actionResults } = turnResult;
 
       if (selectedCourse?.id && actionResults.some((result) => result.ok && result.label === "topic")) {
         const updatedTopics = await base44.entities.Topic.filter({ course_id: selectedCourse.id }, "order", 100);
@@ -138,6 +143,7 @@ export default function AITutor() {
 
       const messagesWithAssistant = [...messagesWithUser, newMessage("assistant", reply)];
       setMessages(messagesWithAssistant);
+      setPendingActions(Array.isArray(turnResult?.pendingActions) ? turnResult.pendingActions : []);
 
       const saved = await saveAIConversation({
         conversation: conversationBeforeTurn,
@@ -152,6 +158,47 @@ export default function AITutor() {
     } catch (error) {
       console.error("AI tutor request failed", error);
       setMessages((prev) => [...prev, newMessage("assistant", error.message || "The local AI request failed. Check the desktop model runtime and try again.")]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const approvePendingActions = async () => {
+    if (!pendingActions.length) return;
+    setLoading(true);
+    try {
+      const actionResults = await executeStudyActions({
+        course: selectedCourse,
+        topic: selectedTopic,
+        sessionId: activeConversation?.session_id,
+        actions: pendingActions,
+      });
+
+      if (selectedCourse?.id && actionResults.some((result) => result.ok && result.label === "topic")) {
+        const updatedTopics = await base44.entities.Topic.filter({ course_id: selectedCourse.id }, "order", 100);
+        setTopics(updatedTopics);
+      }
+
+      const summary = actionResults
+        .map((result) => `- ${result.ok ? "Done" : "Failed"}: ${result.message}`)
+        .join("\n");
+      const approvalMessage = `StudyBridge actions applied.\n\n**StudyBridge actions**\n${summary || "- No actions executed."}`;
+      const messagesWithApproval = [...messages, newMessage("assistant", approvalMessage)];
+      setMessages(messagesWithApproval);
+      setPendingActions([]);
+
+      const saved = await saveAIConversation({
+        conversation: activeConversation,
+        messages: messagesWithApproval,
+        course: selectedCourse,
+        topic: selectedTopic,
+        source: "ai_tutor",
+      });
+      setActiveConversation(saved);
+      await refreshConversations();
+      window.history.replaceState(null, "", `/ai-tutor?conversation=${saved.id}`);
+    } catch (error) {
+      setMessages((prev) => [...prev, newMessage("assistant", error.message || "Failed to apply pending actions.")]);
     } finally {
       setLoading(false);
     }
@@ -258,6 +305,16 @@ export default function AITutor() {
                 })}
               </div>
             </div>
+          )}
+
+          {pendingActions.length > 0 && (
+            <PendingActionsCard
+              courseTitle={selectedCourse?.title}
+              actions={pendingActions}
+              onApprove={approvePendingActions}
+              onCancel={() => setPendingActions([])}
+              busy={loading}
+            />
           )}
 
           {messages.map((msg, i) => (

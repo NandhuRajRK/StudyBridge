@@ -6,6 +6,15 @@ const MAX_DETERMINISTIC_TOPICS_PER_TURN = 10;
 const MAX_STUDY_GUIDE_SECTIONS = 12;
 const MAX_MINDMAP_NODES = 24;
 const MAX_QUIZ_QUESTIONS = 8;
+const WRITE_ACTION_TYPES = new Set([
+  "create_note",
+  "create_topic",
+  "create_task",
+  "create_study_guide",
+  "create_mindmap",
+  "create_material",
+  "create_quiz",
+]);
 
 const tutorSchema = {
   type: "object",
@@ -95,6 +104,7 @@ Allowed grounding ids:
 ${sourceIds.length > 0 ? sourceIds.join(", ") : "none"}
 
 You may also operate StudyBridge when the student explicitly asks you to create, add, save, summarize into, or plan something.
+Any write action will be staged for explicit user approval before StudyBridge applies it.
 
 Available actions:
 - create_note: Create a note for the selected course/topic. Use for "summarize this into notes", "save notes", "add a note".
@@ -125,6 +135,18 @@ function capText(value, max = 4000) {
 
 function capItems(items, max = 12) {
   return normalizeArray(items).slice(0, max);
+}
+
+function actionLabel(action) {
+  if (!action || typeof action !== "object") return "action";
+  if (action.title) return action.title;
+  if (action.description) return action.description;
+  if (action.content) return action.content;
+  return action.type || "action";
+}
+
+function actionRequiresApproval(action) {
+  return WRITE_ACTION_TYPES.has(String(action?.type || "").trim());
 }
 
 function sanitizeAction(action) {
@@ -230,6 +252,12 @@ Current context:
 ${context}`;
 }
 
+function buildPendingApprovalReply({ course, actions, rawReply, grounding = [], nextStep = "", missingContext = [] }) {
+  const summary = actions.map((action, index) => `- ${index + 1}. ${action.type}: ${actionLabel(action)}`).join("\n");
+  const heading = rawReply && !isLowQualityReply(rawReply) ? rawReply : `I’m ready to update ${course?.title || "StudyBridge"} but I need your approval first.`;
+  return `${heading}\n\n**Pending StudyBridge actions**\n${summary || "- None"}\n\nApprove these changes to continue.${formatGroundingFooter({ grounding, nextStep, missingContext })}`;
+}
+
 function extractListItems(text) {
   const afterColon = text.includes(":") ? text.slice(text.indexOf(":") + 1) : text;
   return afterColon
@@ -313,7 +341,7 @@ function buildActionReply({ course, actionResults, rawReply }) {
   return `${rawReply}\n\n**StudyBridge actions**\n${summary}${detailsBlock}`;
 }
 
-async function runDeterministicActions({ course, topic, context, studentText, sessionId, sourceIds = [] }) {
+async function runDeterministicActions({ course, topic, context, studentText, sessionId, sourceIds = [], approvalRequired = true }) {
   if (!course?.id) return null;
   const grounding = normalizeGrounding(["course", "current-topic", "topics", "materials", "notes", "sessions", "tasks"], sourceIds);
 
@@ -323,9 +351,27 @@ async function runDeterministicActions({ course, topic, context, studentText, se
       .slice(0, MAX_DETERMINISTIC_TOPICS_PER_TURN);
 
     if (items.length > 0) {
+      const actions = items.map((item) => ({ type: "create_topic", title: capText(item, 180) }));
+      if (approvalRequired) {
+        return {
+          reply: buildPendingApprovalReply({
+            course,
+            actions,
+            rawReply: `I found ${actions.length} topic${actions.length === 1 ? "" : "s"} to add.`,
+            grounding,
+            nextStep: "Approve these changes to create the topics.",
+          }),
+          pendingActions: actions,
+          grounding,
+          nextStep: "Approve these changes to create the topics.",
+          missingContext: [],
+          actionResults: [],
+        };
+      }
+
       const actionResults = [];
-      for (const item of items) {
-        actionResults.push(await executeAction({ type: "create_topic", title: capText(item, 180) }, { course, topic, sessionId }));
+      for (const action of actions) {
+        actionResults.push(await executeAction(action, { course, topic, sessionId }));
       }
       const skipped = extractListItems(studentText).length - items.length;
       const skippedNotice = skipped > 0 ? `\nThe safety guard skipped ${skipped} extra item${skipped === 1 ? "" : "s"}. Send smaller batches if you want the rest.` : "";
@@ -344,6 +390,22 @@ async function runDeterministicActions({ course, topic, context, studentText, se
       content: capText(context, 8000),
       tags: ["ai-generated"],
     };
+    if (approvalRequired) {
+      return {
+        reply: buildPendingApprovalReply({
+          course,
+          actions: [action],
+          rawReply: "I can save the current context as a note.",
+          grounding,
+          nextStep: "Approve this change to save the note.",
+        }),
+        pendingActions: [action],
+        grounding,
+        nextStep: "Approve this change to save the note.",
+        missingContext: [],
+        actionResults: [],
+      };
+    }
     const actionResults = [await executeAction(action, { course, topic, sessionId })];
     return {
       reply: `I saved the current StudyBridge context into a note.\n\n**StudyBridge actions**\n${actionResults.map((item) => `- ${item.ok ? "Done" : "Failed"}: ${item.message}`).join("\n")}${formatGroundingFooter({ grounding, nextStep: "Open Library to review the new note." })}`,
@@ -504,11 +566,28 @@ async function executeAction(action, { course, topic, sessionId }) {
   return { ok: false, label: action.type || "unknown", message: "Unsupported action." };
 }
 
-export async function runStudyAgent({ course, topic, context, contextBundle, depth, history, studentText, sessionId }) {
+export async function executeStudyActions({ course, topic, sessionId, actions = [] }) {
+  const actionResults = [];
+  const sanitizedActions = actions.map(sanitizeAction).filter(Boolean).filter((action) => action.type);
+  for (const action of sanitizedActions) {
+    try {
+      actionResults.push(await executeAction(action, { course, topic, sessionId }));
+    } catch (error) {
+      actionResults.push({
+        ok: false,
+        label: action.type || "action",
+        message: error.message || "Action failed.",
+      });
+    }
+  }
+  return actionResults;
+}
+
+export async function runStudyAgent({ course, topic, context, contextBundle, depth, history, studentText, sessionId, approvalRequired = true }) {
   const groundedContext = contextBundle?.context || context || "";
   const sourceIds = contextBundle?.sourceIds || [];
 
-  const deterministicResult = await runDeterministicActions({ course, topic, context: groundedContext, studentText, sessionId, sourceIds });
+  const deterministicResult = await runDeterministicActions({ course, topic, context: groundedContext, studentText, sessionId, sourceIds, approvalRequired });
   if (deterministicResult) return deterministicResult;
 
   const result = await base44.integrations.Core.InvokeLLM({
@@ -519,6 +598,33 @@ export async function runStudyAgent({ course, topic, context, contextBundle, dep
   const actions = Array.isArray(result?.actions) ? result.actions : [];
   const sanitizedActions = actions.map(sanitizeAction).filter(Boolean).slice(0, MAX_AGENT_ACTIONS_PER_TURN);
   const skippedActions = Math.max(0, actions.length - sanitizedActions.length);
+  const rawReply = typeof result?.reply === "string" && result.reply.trim()
+    ? result.reply.trim()
+    : buildFallbackReply({ course, topic, context: groundedContext, studentText });
+  const grounding = normalizeGrounding(result?.grounding, sourceIds);
+  const nextStep = typeof result?.next_step === "string" ? result.next_step.trim() : "";
+  const missingContext = normalizeArray(result?.missing_context).map((item) => String(item).trim()).filter(Boolean);
+  const pendingActions = sanitizedActions.filter(actionRequiresApproval);
+
+  if (approvalRequired && pendingActions.length > 0) {
+    return {
+      reply: buildPendingApprovalReply({
+        course,
+        actions: pendingActions,
+        rawReply,
+        grounding,
+        nextStep: nextStep || "Approve these changes to continue.",
+        missingContext,
+      }),
+      grounding,
+      nextStep,
+      missingContext,
+      actionResults: [],
+      pendingActions,
+      approvalRequired: true,
+    };
+  }
+
   const actionResults = [];
 
   for (const action of sanitizedActions) {
@@ -532,13 +638,6 @@ export async function runStudyAgent({ course, topic, context, contextBundle, dep
       });
     }
   }
-
-  const rawReply = typeof result?.reply === "string" && result.reply.trim()
-    ? result.reply.trim()
-    : buildFallbackReply({ course, topic, context: groundedContext, studentText });
-  const grounding = normalizeGrounding(result?.grounding, sourceIds);
-  const nextStep = typeof result?.next_step === "string" ? result.next_step.trim() : "";
-  const missingContext = normalizeArray(result?.missing_context).map((item) => String(item).trim()).filter(Boolean);
 
   if (actionResults.length === 0) {
     return {
@@ -563,7 +662,7 @@ export async function runStudyTurn(args) {
   const contextBundle = args.contextBundle || { context: args.context || "", sourceIds: [] };
 
   if (wantsStudyBridgeAction(args.studentText)) {
-    return runStudyAgent({ ...args, contextBundle });
+    return runStudyAgent({ ...args, contextBundle, approvalRequired: true });
   }
 
   const result = await base44.integrations.Core.InvokeLLM({
@@ -584,5 +683,6 @@ export async function runStudyTurn(args) {
     nextStep,
     missingContext,
     actionResults: [],
+    pendingActions: [],
   };
 }
