@@ -13,6 +13,7 @@ export default function Library() {
   const [courses, setCourses] = useState([]);
   const [materials, setMaterials] = useState([]);
   const [guides, setGuides] = useState([]);
+  const [mindMaps, setMindMaps] = useState([]);
   const [decks, setDecks] = useState([]);
   const [quizzes, setQuizzes] = useState([]);
   const [quizQuestions, setQuizQuestions] = useState([]);
@@ -34,7 +35,10 @@ export default function Library() {
       base44.entities.SavedAIAnswer.list("-created_date", 50),
     ]);
 
-    setCourses(c); setMaterials(m); setGuides(g);
+    setCourses(c);
+    setMaterials(m);
+    setGuides(g);
+    setMindMaps(g.filter((guide) => guide.source === "mindmap"));
     setDecks(d); setQuizzes(q); setQuizQuestions(qq);
     setNotes(n); setSavedAnswers(s);
     setLoading(false);
@@ -103,6 +107,7 @@ export default function Library() {
         <TabsList className="flex-wrap h-auto">
           <TabsTrigger value="materials" className="gap-1.5"><FileText className="w-3.5 h-3.5" /> Materials ({filter(materials).length})</TabsTrigger>
           <TabsTrigger value="guides" className="gap-1.5"><BookOpen className="w-3.5 h-3.5" /> Guides ({filter(guides).length})</TabsTrigger>
+          <TabsTrigger value="mindmaps" className="gap-1.5"><GitBranch className="w-3.5 h-3.5" /> Mind Maps ({filter(mindMaps).length})</TabsTrigger>
           <TabsTrigger value="flashcards" className="gap-1.5"><Zap className="w-3.5 h-3.5" /> Flashcards ({filter(decks).length})</TabsTrigger>
           <TabsTrigger value="quizzes" className="gap-1.5"><HelpCircle className="w-3.5 h-3.5" /> Quizzes ({filter(quizzes).length})</TabsTrigger>
           <TabsTrigger value="notes" className="gap-1.5"><StickyNote className="w-3.5 h-3.5" /> Notes ({filter(notes).length})</TabsTrigger>
@@ -157,6 +162,27 @@ export default function Library() {
                   {g.key_concepts.slice(0, 4).map((c, i) => <span key={i} className="text-xs bg-muted px-2 py-0.5 rounded">{c}</span>)}
                 </div>
               )}
+              <CourseTag course={courseOf(g.course_id)} />
+            </Card>
+          )} />
+        </TabsContent>
+
+        <TabsContent value="mindmaps" className="mt-4">
+          <ItemGrid items={filter(mindMaps)} empty="No mind maps yet." renderItem={g => (
+            <Card>
+              <div className="flex items-start gap-2">
+                <GitBranch className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+                <div className="min-w-0 flex-1">
+                  <h3 className="font-medium text-sm truncate">{g.title}</h3>
+                  <p className="text-xs text-muted-foreground">Mind map</p>
+                </div>
+                <Link
+                  to={`/mindmap?course=${g.course_id}`}
+                  className="text-xs text-primary hover:underline shrink-0"
+                >
+                  Open
+                </Link>
+              </div>
               <CourseTag course={courseOf(g.course_id)} />
             </Card>
           )} />

@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { base44 } from "@/api/base44Client";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -7,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import AiAccessNotice from "@/components/ai/AiAccessNotice";
 import { getDesktopAiNotice, isDesktopAiUnavailable, loadDesktopAiRuntime } from "@/lib/desktopAi";
 import { loadStudyContextBundle } from "@/lib/aiContext";
-import { Loader2, Save, Sparkles, Plus, Trash2, GitBranch, RefreshCw, Download } from "lucide-react";
+import { Loader2, Save, Sparkles, Plus, Trash2, GitBranch, RefreshCw, Download, HelpCircle, ZoomIn, ZoomOut, Move } from "lucide-react";
 import { useLocale } from "@/lib/locale";
 import { downloadMindMapMarkdown, downloadOpml } from "@/lib/exporters";
 
@@ -101,7 +102,7 @@ function collectDescendants(nodes, nodeId) {
 
 function computeLayout(nodes) {
   const root = nodes.find((node) => !node.parentId) || nodes[0];
-  if (!root) return [];
+  if (!root) return { layout: [], edges: [] };
 
   const childrenByParent = new Map();
   nodes.forEach((node) => {
@@ -135,6 +136,9 @@ function computeLayout(nodes) {
   const centerY = 360;
   const layout = nodes.map((node) => {
     const depth = depthById.get(node.id) || 0;
+    if (Number.isFinite(node.x) && Number.isFinite(node.y)) {
+      return { ...node, depth, x: node.x, y: node.y };
+    }
     const siblings = grouped.get(depth) || [];
     const index = Math.max(0, siblings.findIndex((item) => item.id === node.id));
     if (depth === 0) {
@@ -164,6 +168,8 @@ function computeLayout(nodes) {
 
 export default function MindMap() {
   const { t } = useLocale();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [courses, setCourses] = useState([]);
   const [topics, setTopics] = useState([]);
   const [selectedCourseId, setSelectedCourseId] = useState("");
@@ -175,6 +181,12 @@ export default function MindMap() {
   const [saving, setSaving] = useState(false);
   const [building, setBuilding] = useState(false);
   const [runtime, setRuntime] = useState(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const canvasRef = useRef(null);
+  const dragStateRef = useRef(null);
+  const panStateRef = useRef(null);
 
   useEffect(() => {
     loadDesktopAiRuntime().then(setRuntime);
@@ -184,13 +196,18 @@ export default function MindMap() {
     const loadCourses = async () => {
       const activeCourses = await base44.entities.Course.filter({ status: "active" }, "-created_date", 50);
       setCourses(activeCourses);
+      const courseFromQuery = searchParams.get("course");
+      if (courseFromQuery && activeCourses.some((course) => course.id === courseFromQuery)) {
+        setSelectedCourseId(courseFromQuery);
+        return;
+      }
       if (!selectedCourseId && activeCourses.length > 0) {
         setSelectedCourseId(activeCourses[0].id);
       }
     };
 
     loadCourses().catch((error) => console.error("Failed to load courses for mindmap", error));
-  }, []);
+  }, [searchParams, selectedCourseId]);
 
   useEffect(() => {
     const loadMindMap = async () => {
@@ -213,6 +230,8 @@ export default function MindMap() {
       setSelectedNodeId(nextNodes[0]?.id || "");
       setNewChildTitle("");
       setNewChildNote("");
+      setPan({ x: 0, y: 0 });
+      setZoom(1);
     };
 
     loadMindMap().catch((error) => console.error("Failed to load mind map", error));
@@ -222,7 +241,82 @@ export default function MindMap() {
   const selectedNode = nodes.find((node) => node.id === selectedNodeId) || nodes[0] || null;
   const aiUnavailable = isDesktopAiUnavailable(runtime);
   const aiNotice = getDesktopAiNotice(runtime, t);
-  const { layout, edges } = useMemo(() => computeLayout(nodes), [nodes]);
+  const { layout = [], edges = [] } = useMemo(() => computeLayout(nodes), [nodes]);
+
+  const updateNodePosition = (nodeId, x, y) => {
+    setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, x, y } : node)));
+  };
+
+  const canvasPointFromClient = (clientX, clientY) => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    const scale = zoom || 1;
+    return {
+      x: ((clientX - rect.left) / scale) - (pan.x / scale),
+      y: ((clientY - rect.top) / scale) - (pan.y / scale),
+    };
+  };
+
+  const handleNodePointerDown = (event, node) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setSelectedNodeId(node.id);
+    const origin = canvasPointFromClient(event.clientX, event.clientY);
+    if (!origin) return;
+    dragStateRef.current = {
+      nodeId: node.id,
+      pointerId: event.pointerId,
+      startX: origin.x,
+      startY: origin.y,
+      nodeX: node.x,
+      nodeY: node.y,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handleCanvasPointerDown = (event) => {
+    if (event.target !== canvasRef.current) return;
+    panStateRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: pan.x,
+      originY: pan.y,
+    };
+    canvasRef.current?.setPointerCapture(event.pointerId);
+  };
+
+  const handleCanvasPointerMove = (event) => {
+    if (dragStateRef.current?.pointerId === event.pointerId) {
+      const point = canvasPointFromClient(event.clientX, event.clientY);
+      if (!point) return;
+      const offsetX = point.x - dragStateRef.current.startX;
+      const offsetY = point.y - dragStateRef.current.startY;
+      updateNodePosition(
+        dragStateRef.current.nodeId,
+        dragStateRef.current.nodeX + offsetX,
+        dragStateRef.current.nodeY + offsetY,
+      );
+      return;
+    }
+
+    if (panStateRef.current?.pointerId === event.pointerId) {
+      const scale = zoom || 1;
+      setPan({
+        x: panStateRef.current.originX + ((event.clientX - panStateRef.current.startX) / scale),
+        y: panStateRef.current.originY + ((event.clientY - panStateRef.current.startY) / scale),
+      });
+    }
+  };
+
+  const endPointerInteraction = (event) => {
+    if (dragStateRef.current?.pointerId === event.pointerId) {
+      dragStateRef.current = null;
+    }
+    if (panStateRef.current?.pointerId === event.pointerId) {
+      panStateRef.current = null;
+    }
+  };
 
   const addChildNode = (parentId = selectedNode?.id) => {
     if (!parentId || !newChildTitle.trim()) return;
@@ -278,7 +372,11 @@ export default function MindMap() {
         title: `${selectedCourse?.title || "Course"} mind map`,
         difficulty: "custom",
         key_concepts: nodes.filter((node) => node.parentId === nodes[0]?.id).map((node) => node.title).slice(0, 12),
-        sections: nodes,
+        sections: nodes.map(({ x, y, depth, ...rest }) => ({
+          ...rest,
+          x: Number.isFinite(x) ? x : null,
+          y: Number.isFinite(y) ? y : null,
+        })),
         source: "mindmap",
       };
 
@@ -363,16 +461,41 @@ Return JSON with:
     );
   }
 
+  if (!selectedCourseId || !selectedCourse) {
+    return (
+      <div className="p-6 lg:p-8 max-w-3xl mx-auto">
+        <h1 className="text-2xl font-semibold mb-2">{t("nav.mindMap")}</h1>
+        <p className="text-sm text-muted-foreground">Select a course to open its mind map.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">{t("nav.mindMap")}</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-semibold">{t("nav.mindMap")}</h1>
+            <button
+              type="button"
+              onClick={() => setHelpOpen((value) => !value)}
+              className="text-muted-foreground hover:text-foreground transition-colors"
+              aria-label="How to use mind map"
+            >
+              <HelpCircle className="w-4 h-4" />
+            </button>
+          </div>
           <p className="text-sm text-muted-foreground mt-1">
             Build a visual map from your course topics, notes, and AI-generated branches.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => setZoom((value) => Math.max(0.6, Number((value - 0.1).toFixed(2))))} className="gap-2">
+            <ZoomOut className="w-4 h-4" /> Zoom out
+          </Button>
+          <Button variant="outline" onClick={() => setZoom((value) => Math.min(1.8, Number((value + 0.1).toFixed(2))))} className="gap-2">
+            <ZoomIn className="w-4 h-4" /> Zoom in
+          </Button>
           <Button variant="outline" onClick={resetFromTopics} className="gap-2">
             <RefreshCw className="w-4 h-4" /> Rebuild from topics
           </Button>
@@ -397,6 +520,16 @@ Return JSON with:
         <AiAccessNotice title="Mindmap AI is not ready on this desktop" message={aiNotice} />
       )}
 
+      {helpOpen && (
+        <div className="rounded-xl border bg-card p-4 text-sm text-muted-foreground space-y-2">
+          <p className="font-medium text-foreground flex items-center gap-2">
+            <HelpCircle className="w-4 h-4" /> Mind map help
+          </p>
+          <p>Drag nodes to rearrange them. Drag on empty space to pan. Use the zoom buttons for large maps.</p>
+          <p>Save the map to keep it attached to the course. You can reopen it later from the course detail page or Library.</p>
+        </div>
+      )}
+
       <div className="grid gap-6 xl:grid-cols-[1.7fr_.9fr]">
         <div className="space-y-4">
           <div className="rounded-xl border bg-card p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -414,59 +547,97 @@ Return JSON with:
                 ))}
               </SelectContent>
             </Select>
+            <Button variant="outline" onClick={() => navigate(`/courses/${selectedCourseId}`)} className="gap-2">
+              <Move className="w-4 h-4" /> Open course
+            </Button>
           </div>
 
           <div className="rounded-xl border bg-card p-4">
-            <div className="relative min-h-[720px] overflow-hidden rounded-lg bg-gradient-to-b from-background to-muted/20">
-              <svg className="absolute inset-0 h-full w-full" viewBox="0 0 1000 720" preserveAspectRatio="none">
-                {edges.map((edge) => (
-                  <line
-                    key={`${edge.from.id}-${edge.to.id}`}
-                    x1={edge.from.x}
-                    y1={edge.from.y}
-                    x2={edge.to.x}
-                    y2={edge.to.y}
-                    stroke="hsl(var(--border))"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                  />
-                ))}
-              </svg>
+            <div
+              ref={canvasRef}
+              className="relative min-h-[720px] overflow-hidden rounded-lg bg-gradient-to-b from-background to-muted/20 touch-none select-none"
+              onPointerDown={handleCanvasPointerDown}
+              onPointerMove={handleCanvasPointerMove}
+              onPointerUp={endPointerInteraction}
+              onPointerCancel={endPointerInteraction}
+              onDoubleClick={(event) => {
+                const point = canvasPointFromClient(event.clientX, event.clientY);
+                if (!point) return;
+                const parentId = selectedNode?.id || layout[0]?.id;
+                if (!parentId) return;
+                setNodes((prev) => [
+                  ...prev,
+                  {
+                    id: makeId(),
+                    parentId,
+                    title: "New branch",
+                    note: "",
+                    color: DEFAULT_NODE_COLOR,
+                    x: point.x,
+                    y: point.y,
+                  },
+                ]);
+              }}
+            >
+              <div
+                className="absolute left-0 top-0 h-full w-full origin-top-left"
+                style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
+              >
+                <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 1000 720" preserveAspectRatio="none">
+                  {edges.map((edge) => (
+                    <line
+                      key={`${edge.from.id}-${edge.to.id}`}
+                      x1={edge.from.x}
+                      y1={edge.from.y}
+                      x2={edge.to.x}
+                      y2={edge.to.y}
+                      stroke="hsl(var(--border))"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                    />
+                  ))}
+                </svg>
 
-              {layout.map((node) => {
-                const active = node.id === selectedNodeId;
-                return (
-                  <button
-                    key={node.id}
-                    type="button"
-                    onClick={() => setSelectedNodeId(node.id)}
-                    className={`absolute z-10 -translate-x-1/2 -translate-y-1/2 rounded-xl border px-4 py-3 text-left shadow-sm transition-all ${
-                      active ? "border-primary bg-primary text-primary-foreground shadow-md scale-[1.03]" : "bg-card hover:border-primary/60 hover:shadow-md"
-                    }`}
-                    style={{
-                      left: `${(node.x / 1000) * 100}%`,
-                      top: `${(node.y / 720) * 100}%`,
-                      maxWidth: node.depth === 0 ? 260 : 210,
-                      minWidth: node.depth === 0 ? 220 : 170,
-                    }}
-                  >
-                    <div className="flex items-start gap-2">
-                      <div
-                        className="mt-1 h-2.5 w-2.5 rounded-full shrink-0"
-                        style={{ backgroundColor: active ? "white" : node.color || DEFAULT_NODE_COLOR }}
-                      />
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium leading-tight">{node.title}</p>
-                        {node.note && (
-                          <p className={`mt-1 text-xs leading-5 ${active ? "text-primary-foreground/80" : "text-muted-foreground"}`}>
-                            {node.note}
-                          </p>
-                        )}
+                {layout.length === 0 ? (
+                  <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
+                    No nodes yet. Rebuild from topics or add a child branch.
+                  </div>
+                ) : layout.map((node) => {
+                  const active = node.id === selectedNodeId;
+                  return (
+                    <button
+                      key={node.id}
+                      type="button"
+                      onClick={() => setSelectedNodeId(node.id)}
+                      onPointerDown={(event) => handleNodePointerDown(event, node)}
+                      className={`absolute z-10 -translate-x-1/2 -translate-y-1/2 rounded-xl border px-4 py-3 text-left shadow-sm transition-all cursor-grab active:cursor-grabbing ${
+                        active ? "border-primary bg-primary text-primary-foreground shadow-md scale-[1.03]" : "bg-card hover:border-primary/60 hover:shadow-md"
+                      }`}
+                      style={{
+                        left: `${node.x}px`,
+                        top: `${node.y}px`,
+                        maxWidth: node.depth === 0 ? 260 : 210,
+                        minWidth: node.depth === 0 ? 220 : 170,
+                      }}
+                    >
+                      <div className="flex items-start gap-2">
+                        <div
+                          className="mt-1 h-2.5 w-2.5 rounded-full shrink-0"
+                          style={{ backgroundColor: active ? "white" : node.color || DEFAULT_NODE_COLOR }}
+                        />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium leading-tight">{node.title}</p>
+                          {node.note && (
+                            <p className={`mt-1 text-xs leading-5 ${active ? "text-primary-foreground/80" : "text-muted-foreground"}`}>
+                              {node.note}
+                            </p>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  </button>
-                );
-              })}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>
