@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Send, Loader2, Bot, Bookmark, BookOpen, HelpCircle, List, Zap, Layers, History, Plus } from "lucide-react";
 import { loadStudyContextBundle } from "@/lib/aiContext";
-import { executeStudyActions, runStudyTurn } from "@/lib/aiActions";
+import { executeStudyActions, getRecoverablePendingActions, isPendingActionApproval, isPendingActionCancellation, runStudyTurn } from "@/lib/aiActions";
 import { listAIConversations, loadAIConversation, saveAIAnswer, saveAIConversation } from "@/lib/aiConversations";
 import AiAccessNotice from "@/components/ai/AiAccessNotice";
 import { getDesktopAiNotice, isDesktopAiUnavailable, loadDesktopAiRuntime } from "@/lib/desktopAi";
@@ -21,10 +21,11 @@ const ACTIONS = [
   { icon: Layers, label: "Real examples", prompt: "Give me real-world examples that illustrate this topic" },
 ];
 
-const newMessage = (role, content) => ({
+const newMessage = (role, content, extras = {}) => ({
   role,
   content,
   created_at: new Date().toISOString(),
+  ...extras,
 });
 
 export default function AITutor() {
@@ -91,11 +92,12 @@ export default function AITutor() {
   };
 
   const selectConversation = (conversation) => {
+    const conversationMessages = conversation.messages || [];
     setActiveConversation(conversation);
-    setMessages(conversation.messages || []);
+    setMessages(conversationMessages);
     setSelectedCourseId(conversation.course_id || "");
     setSelectedTopicId(conversation.topic_id || "");
-    setPendingActions([]);
+    setPendingActions(getRecoverablePendingActions(conversationMessages));
     window.history.replaceState(null, "", `/ai-tutor?conversation=${conversation.id}`);
   };
 
@@ -112,6 +114,68 @@ export default function AITutor() {
     window.history.replaceState(null, "", "/ai-tutor");
   };
 
+  const refreshTopicsAfterActions = async (actionResults) => {
+    if (selectedCourse?.id && actionResults.some((result) => result.ok && result.label === "topic")) {
+      const updatedTopics = await base44.entities.Topic.filter({ course_id: selectedCourse.id }, "order", 100);
+      setTopics(updatedTopics);
+    }
+  };
+
+  const cancelPendingActions = async ({ messagesBase = messages, conversationBase = activeConversation } = {}) => {
+    const messagesWithCancel = [...messagesBase, newMessage("assistant", "Pending StudyBridge actions canceled. No changes were applied.", { actionStatus: "canceled" })];
+    setMessages(messagesWithCancel);
+    setPendingActions([]);
+
+    const saved = await saveAIConversation({
+      conversation: conversationBase,
+      messages: messagesWithCancel,
+      course: selectedCourse,
+      topic: selectedTopic,
+      source: "ai_tutor",
+    });
+    setActiveConversation(saved);
+    await refreshConversations();
+    window.history.replaceState(null, "", `/ai-tutor?conversation=${saved.id}`);
+  };
+
+  const applyPendingActions = async ({ messagesBase = messages, conversationBase = activeConversation } = {}) => {
+    if (!pendingActions.length) return;
+    setLoading(true);
+    try {
+      const actionResults = await executeStudyActions({
+        course: selectedCourse,
+        topic: selectedTopic,
+        sessionId: conversationBase?.session_id,
+        actions: pendingActions,
+      });
+
+      await refreshTopicsAfterActions(actionResults);
+
+      const summary = actionResults
+        .map((result) => `- ${result.ok ? "Done" : "Failed"}: ${result.message}`)
+        .join("\n");
+      const approvalMessage = `StudyBridge actions applied.\n\n**StudyBridge actions**\n${summary || "- No actions executed."}`;
+      const messagesWithApproval = [...messagesBase, newMessage("assistant", approvalMessage, { actionStatus: "applied" })];
+      setMessages(messagesWithApproval);
+      setPendingActions([]);
+
+      const saved = await saveAIConversation({
+        conversation: conversationBase,
+        messages: messagesWithApproval,
+        course: selectedCourse,
+        topic: selectedTopic,
+        source: "ai_tutor",
+      });
+      setActiveConversation(saved);
+      await refreshConversations();
+      window.history.replaceState(null, "", `/ai-tutor?conversation=${saved.id}`);
+    } catch (error) {
+      setMessages((prev) => [...prev, newMessage("assistant", error.message || "Failed to apply pending actions.")]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const sendMessage = async (text) => {
     if (!text.trim() || loading) return;
 
@@ -122,6 +186,23 @@ export default function AITutor() {
 
     setMessages(messagesWithUser);
     setInput("");
+
+    if (pendingActions.length && isPendingActionApproval(userMessage.content)) {
+      await applyPendingActions({
+        messagesBase: messagesWithUser,
+        conversationBase: conversationBeforeTurn,
+      });
+      return;
+    }
+
+    if (pendingActions.length && isPendingActionCancellation(userMessage.content)) {
+      await cancelPendingActions({
+        messagesBase: messagesWithUser,
+        conversationBase: conversationBeforeTurn,
+      });
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -136,14 +217,15 @@ export default function AITutor() {
       });
       const { reply, actionResults } = turnResult;
 
-      if (selectedCourse?.id && actionResults.some((result) => result.ok && result.label === "topic")) {
-        const updatedTopics = await base44.entities.Topic.filter({ course_id: selectedCourse.id }, "order", 100);
-        setTopics(updatedTopics);
-      }
+      await refreshTopicsAfterActions(actionResults);
 
-      const messagesWithAssistant = [...messagesWithUser, newMessage("assistant", reply)];
+      const nextPendingActions = Array.isArray(turnResult?.pendingActions) ? turnResult.pendingActions : [];
+      const messagesWithAssistant = [
+        ...messagesWithUser,
+        newMessage("assistant", reply, nextPendingActions.length ? { pendingActions: nextPendingActions } : {}),
+      ];
       setMessages(messagesWithAssistant);
-      setPendingActions(Array.isArray(turnResult?.pendingActions) ? turnResult.pendingActions : []);
+      setPendingActions(nextPendingActions);
 
       const saved = await saveAIConversation({
         conversation: conversationBeforeTurn,
@@ -164,44 +246,7 @@ export default function AITutor() {
   };
 
   const approvePendingActions = async () => {
-    if (!pendingActions.length) return;
-    setLoading(true);
-    try {
-      const actionResults = await executeStudyActions({
-        course: selectedCourse,
-        topic: selectedTopic,
-        sessionId: activeConversation?.session_id,
-        actions: pendingActions,
-      });
-
-      if (selectedCourse?.id && actionResults.some((result) => result.ok && result.label === "topic")) {
-        const updatedTopics = await base44.entities.Topic.filter({ course_id: selectedCourse.id }, "order", 100);
-        setTopics(updatedTopics);
-      }
-
-      const summary = actionResults
-        .map((result) => `- ${result.ok ? "Done" : "Failed"}: ${result.message}`)
-        .join("\n");
-      const approvalMessage = `StudyBridge actions applied.\n\n**StudyBridge actions**\n${summary || "- No actions executed."}`;
-      const messagesWithApproval = [...messages, newMessage("assistant", approvalMessage)];
-      setMessages(messagesWithApproval);
-      setPendingActions([]);
-
-      const saved = await saveAIConversation({
-        conversation: activeConversation,
-        messages: messagesWithApproval,
-        course: selectedCourse,
-        topic: selectedTopic,
-        source: "ai_tutor",
-      });
-      setActiveConversation(saved);
-      await refreshConversations();
-      window.history.replaceState(null, "", `/ai-tutor?conversation=${saved.id}`);
-    } catch (error) {
-      setMessages((prev) => [...prev, newMessage("assistant", error.message || "Failed to apply pending actions.")]);
-    } finally {
-      setLoading(false);
-    }
+    await applyPendingActions();
   };
 
   const saveAnswer = async (msg, idx) => {
@@ -307,16 +352,6 @@ export default function AITutor() {
             </div>
           )}
 
-          {pendingActions.length > 0 && (
-            <PendingActionsCard
-              courseTitle={selectedCourse?.title}
-              actions={pendingActions}
-              onApprove={approvePendingActions}
-              onCancel={() => setPendingActions([])}
-              busy={loading}
-            />
-          )}
-
           {messages.map((msg, i) => (
             <div key={`${msg.created_at || i}-${i}`} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
               <div className={`max-w-[85%] ${msg.role === "user" ? "bg-primary text-primary-foreground rounded-2xl rounded-br-md px-4 py-2.5" : "bg-card text-card-foreground rounded-2xl rounded-bl-md px-4 py-3 border shadow-sm"}`}>
@@ -336,6 +371,16 @@ export default function AITutor() {
               </div>
             </div>
           ))}
+
+          {pendingActions.length > 0 && (
+            <PendingActionsCard
+              courseTitle={selectedCourse?.title}
+              actions={pendingActions}
+              onApprove={approvePendingActions}
+              onCancel={() => cancelPendingActions()}
+              busy={loading}
+            />
+          )}
 
           {loading && (
             <div className="flex items-center gap-2 text-muted-foreground">

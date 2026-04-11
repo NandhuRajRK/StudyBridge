@@ -400,11 +400,20 @@ export default function MindMap() {
 Current focus node: ${selectedNode.title}
 Current note: ${selectedNode.note || "none"}
 Existing children: ${nodes.filter((node) => node.parentId === selectedNode.id).map((node) => node.title).join(", ") || "none"}
+Existing map nodes: ${nodes.map((node) => `${node.title}${node.parentId ? ` -> parent ${nodes.find((candidate) => candidate.id === node.parentId)?.title || "unknown"}` : " -> root"}`).join("; ")}
 
 Use this course context:
 ${contextBundle.context}
 
-Generate 4 to 6 concise child nodes that are directly useful for studying.
+Generate 4 to 6 concise child nodes that are directly useful for studying this focus node.
+Rules:
+- Do not repeat existing child nodes or duplicate sibling ideas.
+- Prefer branches that reveal relationships: prerequisite, core concept, example/application, common mistake, practice route, or review checkpoint.
+- Make each title short enough for a node label.
+- Make each note actionable: explain what the student should remember, compare, practice, or check.
+- Use course context when available; do not invent unsupported syllabus details.
+- Use colors consistently: prerequisites #7950F2, concepts #1098AD, examples #37B24D, mistakes #E8590C, practice/review #F59F00.
+- If the focus node is too broad, create structured sub-branches rather than a generic list.
 Return JSON with:
 {
   "nodes": [

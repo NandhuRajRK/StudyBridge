@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Send, Loader2, Bookmark, Lightbulb } from "lucide-react";
 import { loadStudyContextBundle } from "@/lib/aiContext";
-import { executeStudyActions, runStudyTurn } from "@/lib/aiActions";
+import { executeStudyActions, getRecoverablePendingActions, isPendingActionApproval, isPendingActionCancellation, runStudyTurn } from "@/lib/aiActions";
 import { isConversationRecord, saveAIAnswer, saveAIConversation } from "@/lib/aiConversations";
 import AiAccessNotice from "@/components/ai/AiAccessNotice";
 import { getDesktopAiNotice, isDesktopAiUnavailable, loadDesktopAiRuntime } from "@/lib/desktopAi";
@@ -20,10 +20,11 @@ const SUGGESTED_PROMPTS = [
   "What questions might appear on the exam?",
 ];
 
-const newMessage = (role, content) => ({
+const newMessage = (role, content, extras = {}) => ({
   role,
   content,
   created_at: new Date().toISOString(),
+  ...extras,
 });
 
 export default function StudyAIChat({ course, topic, sessionId }) {
@@ -48,9 +49,10 @@ export default function StudyAIChat({ course, topic, sessionId }) {
       ));
 
       if (found) {
+        const conversationMessages = found.messages || [];
         setConversation(found);
-        setMessages(found.messages || []);
-        setPendingActions([]);
+        setMessages(conversationMessages);
+        setPendingActions(getRecoverablePendingActions(conversationMessages));
       }
     };
 
@@ -67,6 +69,58 @@ export default function StudyAIChat({ course, topic, sessionId }) {
     }
   }, [messages]);
 
+  const cancelPendingActions = async ({ messagesBase = messages, conversationBase = conversation } = {}) => {
+    const messagesWithCancel = [...messagesBase, newMessage("assistant", "Pending StudyBridge actions canceled. No changes were applied.", { actionStatus: "canceled" })];
+    setMessages(messagesWithCancel);
+    setPendingActions([]);
+
+    const saved = await saveAIConversation({
+      conversation: conversationBase,
+      messages: messagesWithCancel,
+      course,
+      topic,
+      source: "study_session",
+      sessionId,
+      title: `${topic.title} study chat`,
+    });
+    setConversation(saved);
+  };
+
+  const applyPendingActions = async ({ messagesBase = messages, conversationBase = conversation } = {}) => {
+    if (!pendingActions.length) return;
+    setLoading(true);
+    try {
+      const actionResults = await executeStudyActions({
+        course,
+        topic,
+        sessionId,
+        actions: pendingActions,
+      });
+      const summary = actionResults
+        .map((result) => `- ${result.ok ? "Done" : "Failed"}: ${result.message}`)
+        .join("\n");
+      const approvalMessage = `StudyBridge actions applied.\n\n**StudyBridge actions**\n${summary || "- No actions executed."}`;
+      const messagesWithApproval = [...messagesBase, newMessage("assistant", approvalMessage, { actionStatus: "applied" })];
+      setMessages(messagesWithApproval);
+      setPendingActions([]);
+
+      const saved = await saveAIConversation({
+        conversation: conversationBase,
+        messages: messagesWithApproval,
+        course,
+        topic,
+        source: "study_session",
+        sessionId,
+        title: `${topic.title} study chat`,
+      });
+      setConversation(saved);
+    } catch (error) {
+      setMessages((prev) => [...prev, newMessage("assistant", error.message || "Failed to apply pending actions.")]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const sendMessage = async (text) => {
     if (!text.trim() || loading) return;
 
@@ -77,6 +131,23 @@ export default function StudyAIChat({ course, topic, sessionId }) {
 
     setMessages(messagesWithUser);
     setInput("");
+
+    if (pendingActions.length && isPendingActionApproval(userMessage.content)) {
+      await applyPendingActions({
+        messagesBase: messagesWithUser,
+        conversationBase: conversationBeforeTurn,
+      });
+      return;
+    }
+
+    if (pendingActions.length && isPendingActionCancellation(userMessage.content)) {
+      await cancelPendingActions({
+        messagesBase: messagesWithUser,
+        conversationBase: conversationBeforeTurn,
+      });
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -92,9 +163,13 @@ export default function StudyAIChat({ course, topic, sessionId }) {
       });
       const { reply } = turnResult;
 
-      const messagesWithAssistant = [...messagesWithUser, newMessage("assistant", reply)];
+      const nextPendingActions = Array.isArray(turnResult?.pendingActions) ? turnResult.pendingActions : [];
+      const messagesWithAssistant = [
+        ...messagesWithUser,
+        newMessage("assistant", reply, nextPendingActions.length ? { pendingActions: nextPendingActions } : {}),
+      ];
       setMessages(messagesWithAssistant);
-      setPendingActions(Array.isArray(turnResult?.pendingActions) ? turnResult.pendingActions : []);
+      setPendingActions(nextPendingActions);
 
       const saved = await saveAIConversation({
         conversation: conversationBeforeTurn,
@@ -115,38 +190,7 @@ export default function StudyAIChat({ course, topic, sessionId }) {
   };
 
   const approvePendingActions = async () => {
-    if (!pendingActions.length) return;
-    setLoading(true);
-    try {
-      const actionResults = await executeStudyActions({
-        course,
-        topic,
-        sessionId,
-        actions: pendingActions,
-      });
-      const summary = actionResults
-        .map((result) => `- ${result.ok ? "Done" : "Failed"}: ${result.message}`)
-        .join("\n");
-      const approvalMessage = `StudyBridge actions applied.\n\n**StudyBridge actions**\n${summary || "- No actions executed."}`;
-      const messagesWithApproval = [...messages, newMessage("assistant", approvalMessage)];
-      setMessages(messagesWithApproval);
-      setPendingActions([]);
-
-      const saved = await saveAIConversation({
-        conversation,
-        messages: messagesWithApproval,
-        course,
-        topic,
-        source: "study_session",
-        sessionId,
-        title: `${topic.title} study chat`,
-      });
-      setConversation(saved);
-    } catch (error) {
-      setMessages((prev) => [...prev, newMessage("assistant", error.message || "Failed to apply pending actions.")]);
-    } finally {
-      setLoading(false);
-    }
+    await applyPendingActions();
   };
 
   const aiUnavailable = isDesktopAiUnavailable(runtime);
@@ -169,16 +213,6 @@ export default function StudyAIChat({ course, topic, sessionId }) {
           <AiAccessNotice
             title="AI is not ready on this desktop"
             message={aiNotice}
-          />
-        )}
-
-        {pendingActions.length > 0 && (
-          <PendingActionsCard
-            courseTitle={course?.title}
-            actions={pendingActions}
-            onApprove={approvePendingActions}
-            onCancel={() => setPendingActions([])}
-            busy={loading}
           />
         )}
 
@@ -222,6 +256,16 @@ export default function StudyAIChat({ course, topic, sessionId }) {
             </div>
           </div>
         ))}
+
+        {pendingActions.length > 0 && (
+          <PendingActionsCard
+            courseTitle={course?.title}
+            actions={pendingActions}
+            onApprove={approvePendingActions}
+            onCancel={() => cancelPendingActions()}
+            busy={loading}
+          />
+        )}
 
         {loading && (
           <div className="flex items-center gap-2 text-muted-foreground">

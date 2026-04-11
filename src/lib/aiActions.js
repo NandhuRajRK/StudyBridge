@@ -1,8 +1,9 @@
 import { base44 } from "@/api/base44Client";
 import { buildTutorPrompt, loadStudyContextBundle } from "@/lib/aiContext";
 
-const MAX_AGENT_ACTIONS_PER_TURN = 5;
+const MAX_AGENT_ACTIONS_PER_TURN = 36;
 const MAX_DETERMINISTIC_TOPICS_PER_TURN = 10;
+const MAX_STUDY_PLAN_TASKS_PER_TURN = 36;
 const MAX_STUDY_GUIDE_SECTIONS = 12;
 const MAX_MINDMAP_NODES = 24;
 const MAX_QUIZ_QUESTIONS = 8;
@@ -41,12 +42,18 @@ const actionSchema = {
           title: { type: "string" },
           content: { type: "string" },
           description: { type: "string" },
+          instructions: { type: "string" },
+          outcome: { type: "string" },
           tags: { type: "array", items: { type: "string" } },
           items: { type: "array", items: { type: "string" } },
           priority: { type: "string" },
           task_type: { type: "string" },
           days_from_now: { type: "number" },
+          due_date: { type: "string" },
+          due_at: { type: "string" },
           estimated_minutes: { type: "number" },
+          course_title: { type: "string" },
+          topic_title: { type: "string" },
           difficulty: { type: "string" },
           material_type: { type: "string" },
           key_concepts: { type: "array", items: { type: "string" } },
@@ -60,6 +67,8 @@ const actionSchema = {
                 title: { type: "string" },
                 note: { type: "string" },
                 color: { type: "string" },
+                x: { type: "number" },
+                y: { type: "number" },
               },
             },
           },
@@ -119,6 +128,14 @@ Action rules:
 - Only emit actions when the student clearly asks you to modify StudyBridge data.
 - If the student asks for a practice quiz, quiz, conversion questions, or practice questions, use create_quiz. Do not use create_task.
 - For create_quiz, include 4-8 questions. Each question needs question, 4 options, correct, and explanation.
+- For study-plan, timetable, semester, exam-prep, or multi-week schedule requests, emit multiple create_task actions: one concrete task per study block/date. Never create one vague task like "plan weeks 1-10".
+- Schedule plans across the requested dates or, if no exact dates are given, spread tasks from today until the exam date when available. Respect student constraints in the chat such as weekdays, blocked days, time budget, session length, preferred times, and intensity.
+- Use known StudyBridge context: topics, current mastery, confidence, existing tasks, materials, notes, recent sessions, daily goal, planner item limit, and exam date. Prioritize weak/not-started topics and avoid duplicating open tasks.
+- Use evidence-based study methods in tasks: first-pass understanding, active recall, spaced review, interleaving, practice questions, error review, and final cumulative review. Link each task to a topic when possible.
+- For create_task include title, instructions, outcome, task_type, priority, days_from_now or due_date/due_at, estimated_minutes, topic_title when possible, and course_title if relevant.
+- For create_mindmap, return a real hierarchy, not a flat list. Include exactly one root node with parentId null, 3-6 major branches, and useful children under those branches when context supports it.
+- Mind map nodes should expose relationships: prerequisites, core concepts, examples/applications, common mistakes, practice routes, and review checkpoints. Avoid duplicate topic names and avoid generic nodes like "overview" unless the course context needs one.
+- Each mind map node should have a short study-useful note that explains why it matters or what to do with it. Use consistent colors for conceptual groups when possible.
 - Do not pretend to upload or read files. If a file is needed, tell the student uploads need a file.
 - If the request is ambiguous, return no actions and ask a clarification in reply.
 - If multiple topics/tasks are requested, emit multiple actions.
@@ -135,6 +152,14 @@ function capText(value, max = 4000) {
 
 function capItems(items, max = 12) {
   return normalizeArray(items).slice(0, max);
+}
+
+function normalizeComparableText(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ");
 }
 
 function actionLabel(action) {
@@ -158,12 +183,18 @@ function sanitizeAction(action) {
     title: capText(typeof action.title === "string" ? action.title : "", 180),
     content: capText(typeof action.content === "string" ? action.content : "", 8000),
     description: capText(typeof action.description === "string" ? action.description : "", 4000),
+    instructions: capText(typeof action.instructions === "string" ? action.instructions : "", 4000),
+    outcome: capText(typeof action.outcome === "string" ? action.outcome : "", 800),
     tags: capItems(action.tags, 8).map((tag) => capText(String(tag), 40)),
-    items: capItems(action.items, 12).map((item) => capText(String(item), 120)),
+    items: capItems(action.items, MAX_STUDY_PLAN_TASKS_PER_TURN).map((item) => capText(String(item), 180)),
     priority: typeof action.priority === "string" ? action.priority.trim() : undefined,
     task_type: typeof action.task_type === "string" ? action.task_type.trim() : undefined,
     days_from_now: Number.isFinite(action.days_from_now) ? Math.max(0, Math.min(90, Math.round(action.days_from_now))) : undefined,
+    due_date: typeof action.due_date === "string" ? action.due_date.trim() : undefined,
+    due_at: typeof action.due_at === "string" ? action.due_at.trim() : undefined,
     estimated_minutes: Number.isFinite(action.estimated_minutes) ? Math.max(5, Math.min(600, Math.round(action.estimated_minutes))) : undefined,
+    course_title: capText(typeof action.course_title === "string" ? action.course_title : "", 180),
+    topic_title: capText(typeof action.topic_title === "string" ? action.topic_title : "", 180),
     difficulty: typeof action.difficulty === "string" ? action.difficulty.trim() : undefined,
     material_type: typeof action.material_type === "string" ? action.material_type.trim() : undefined,
     key_concepts: capItems(action.key_concepts, 12).map((item) => capText(String(item), 120)),
@@ -180,6 +211,8 @@ function sanitizeAction(action) {
         title: capText(node?.title || "", 180),
         note: capText(node?.note || "", 800),
         color: capText(node?.color || "", 40),
+        x: Number.isFinite(node?.x) ? node.x : undefined,
+        y: Number.isFinite(node?.y) ? node.y : undefined,
       }))
       .filter((node) => node.title),
     questions: capItems(action.questions, MAX_QUIZ_QUESTIONS)
@@ -253,9 +286,9 @@ ${context}`;
 }
 
 function buildPendingApprovalReply({ course, actions, rawReply, grounding = [], nextStep = "", missingContext = [] }) {
-  const summary = actions.map((action, index) => `- ${index + 1}. ${action.type}: ${actionLabel(action)}`).join("\n");
+  const summary = actions.map((action) => `- ${action.type}: ${actionLabel(action)}`).join("\n");
   const heading = rawReply && !isLowQualityReply(rawReply) ? rawReply : `I’m ready to update ${course?.title || "StudyBridge"} but I need your approval first.`;
-  return `${heading}\n\n**Pending StudyBridge actions**\n${summary || "- None"}\n\nApprove these changes to continue.${formatGroundingFooter({ grounding, nextStep, missingContext })}`;
+  return `${heading}\n\n**Pending StudyBridge actions**\n${summary || "- None"}\n\nUse the approval controls below, or type "approve", to apply these changes.${formatGroundingFooter({ grounding, nextStep, missingContext })}`;
 }
 
 function extractListItems(text) {
@@ -279,6 +312,123 @@ function wantsStudyBridgeAction(text) {
     /\b(topic|topics|note|notes|task|tasks|guide|material|resource|planner|flashcard|quiz|mindmap|mind\s*map)\b/i.test(text);
 }
 
+export function isPendingActionApproval(text) {
+  return /^(approve|approved|apply|confirm|yes|yep|yeah|ok|okay|do it|go ahead|proceed|looks good|run it|save it)\b/i.test(String(text || "").trim());
+}
+
+export function isPendingActionCancellation(text) {
+  return /^(cancel|discard|stop|no|nope|never mind|nevermind|don't|do not)\b/i.test(String(text || "").trim());
+}
+
+function parsePendingActionsFromReply(content) {
+  if (typeof content !== "string" || !/Pending StudyBridge actions/i.test(content)) return [];
+
+  return content
+    .split("\n")
+    .map((line) => line.match(/^\s*[-*]\s*(?:\d+\.\s*)?(create_[a-z_]+)\s*:\s*(.+?)\s*$/i))
+    .filter(Boolean)
+    .map((match) => sanitizeAction({ type: match[1], title: match[2] }))
+    .filter(Boolean)
+    .filter(actionRequiresApproval);
+}
+
+export function getRecoverablePendingActions(messages = []) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message) continue;
+    if (message.actionStatus === "applied" || message.actionStatus === "canceled") return [];
+    if (/StudyBridge actions applied|Pending StudyBridge actions canceled/i.test(message.content || "")) return [];
+    if (Array.isArray(message.pendingActions) && message.pendingActions.length > 0) {
+      return message.pendingActions.map(sanitizeAction).filter(Boolean).filter(actionRequiresApproval);
+    }
+
+    const recovered = parsePendingActionsFromReply(message.content);
+    if (recovered.length > 0) return recovered;
+  }
+
+  return [];
+}
+
+function isBroadStudyPlanAction(action) {
+  const text = [action?.title, action?.content, action?.description, action?.instructions].filter(Boolean).join(" ");
+  return /\b(plan|schedule|timetable|semester|week|weeks|revision|exam prep|study plan)\b/i.test(text);
+}
+
+function expandTaskItems(action) {
+  if (action?.type !== "create_task" || !Array.isArray(action.items) || action.items.length === 0) {
+    return [action];
+  }
+
+  const baseOffset = Number.isFinite(action.days_from_now) ? action.days_from_now : 0;
+  const spacingDays = isBroadStudyPlanAction(action) ? 2 : 1;
+  return action.items.slice(0, MAX_STUDY_PLAN_TASKS_PER_TURN).map((item, index) => ({
+    ...action,
+    title: capText(item, 180),
+    content: "",
+    items: [],
+    days_from_now: baseOffset + index * spacingDays,
+    instructions: action.instructions || `Study ${item}. Use active recall, make brief notes, then test yourself with practice questions.`,
+    outcome: action.outcome || `You can explain ${item} and answer practice questions without notes.`,
+  }));
+}
+
+function normalizeActionList(actions = []) {
+  return actions
+    .map(sanitizeAction)
+    .filter(Boolean)
+    .flatMap(expandTaskItems)
+    .map(sanitizeAction)
+    .filter(Boolean)
+    .slice(0, MAX_AGENT_ACTIONS_PER_TURN);
+}
+
+function makeActionNodeId(prefix = "node") {
+  return globalThis.crypto?.randomUUID?.() || `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function normalizeMindMapNodes(action, course, topic) {
+  const sourceNodes = normalizeArray(action.nodes).filter((node) => node?.title).slice(0, MAX_MINDMAP_NODES);
+  if (sourceNodes.length === 0) return [];
+
+  const root = sourceNodes.find((node) => !node.parentId) || {
+    id: "root",
+    title: action.title || `${topic?.title || course?.title || "Study"} mind map`,
+    note: action.description || "Start here and branch into the most important study relationships.",
+    color: "#3B5BDB",
+  };
+  const rootId = root.id || "root";
+  const knownIds = new Set(sourceNodes.map((node) => node.id).filter(Boolean));
+  const normalizedRoot = {
+    id: rootId,
+    parentId: null,
+    title: root.title || action.title || `${topic?.title || course?.title || "Study"} mind map`,
+    note: root.note || "Start here and branch into the most important study relationships.",
+    color: root.color || "#3B5BDB",
+    x: Number.isFinite(root.x) ? root.x : undefined,
+    y: Number.isFinite(root.y) ? root.y : undefined,
+  };
+
+  const children = sourceNodes
+    .filter((node) => node !== root)
+    .map((node, index) => {
+      const id = node.id || makeActionNodeId("mindmap-node");
+      const parentId = node.parentId && (node.parentId === rootId || knownIds.has(node.parentId))
+        ? node.parentId
+        : rootId;
+      return {
+        id,
+        parentId,
+        title: node.title,
+        note: node.note || "Use this branch for active recall and practice.",
+        color: node.color || ["#1098AD", "#F59F00", "#37B24D", "#7950F2", "#E8590C"][index % 5],
+        x: Number.isFinite(node.x) ? node.x : undefined,
+        y: Number.isFinite(node.y) ? node.y : undefined,
+      };
+    });
+
+  return [normalizedRoot, ...children];
+}
+
 function buildAgentPrompt({ course, topic, context, depth, history, studentText, sourceIds = [] }) {
   return `${buildTutorOutputPrompt({ course, topic, context, depth, history, studentText, sourceIds })}
 
@@ -286,6 +436,14 @@ Action rules:
 - Only emit actions when the student clearly asks you to modify StudyBridge data.
 - If the student asks for a practice quiz, quiz, conversion questions, or practice questions, use create_quiz. Do not use create_task.
 - For create_quiz, include 4-8 questions. Each question needs question, 4 options, correct, and explanation.
+- For study-plan, timetable, semester, exam-prep, or multi-week schedule requests, emit multiple create_task actions: one concrete task per study block/date. Never create one vague task like "plan weeks 1-10".
+- Schedule plans across the requested dates or, if no exact dates are given, spread tasks from today until the exam date when available. Respect student constraints in the chat such as weekdays, blocked days, time budget, session length, preferred times, and intensity.
+- Use known StudyBridge context: topics, current mastery, confidence, existing tasks, materials, notes, recent sessions, daily goal, planner item limit, and exam date. Prioritize weak/not-started topics and avoid duplicating open tasks.
+- Use evidence-based study methods in tasks: first-pass understanding, active recall, spaced review, interleaving, practice questions, error review, and final cumulative review. Link each task to a topic when possible.
+- For create_task include title, instructions, outcome, task_type, priority, days_from_now or due_date/due_at, estimated_minutes, topic_title when possible, and course_title if relevant.
+- For create_mindmap, return a real hierarchy, not a flat list. Include exactly one root node with parentId null, 3-6 major branches, and useful children under those branches when context supports it.
+- Mind map nodes should expose relationships: prerequisites, core concepts, examples/applications, common mistakes, practice routes, and review checkpoints. Avoid duplicate topic names and avoid generic nodes like "overview" unless the course context needs one.
+- Each mind map node should have a short study-useful note that explains why it matters or what to do with it. Use consistent colors for conceptual groups when possible.
 - Do not pretend to upload or read files. If a file is needed, tell the student uploads need a file.
 - If the request is ambiguous, return no actions and ask a clarification in reply.
 - If multiple topics/tasks are requested, emit multiple actions.
@@ -421,6 +579,38 @@ function actionNeedsCourse(action) {
   return ["create_note", "create_topic", "create_task", "create_study_guide", "create_mindmap", "create_material", "create_quiz"].includes(action.type);
 }
 
+function parseTaskDueDate(action) {
+  const explicit = action.due_at || action.due_date;
+  if (explicit) {
+    const parsed = new Date(explicit);
+    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
+  }
+
+  if (Number.isFinite(action.days_from_now)) {
+    return new Date(Date.now() + action.days_from_now * 24 * 60 * 60 * 1000).toISOString();
+  }
+
+  return undefined;
+}
+
+async function resolveActionTopic({ course, topic, action }) {
+  if (action.topic_id) return action.topic_id;
+  if (topic?.id && (!action.topic_title || normalizeComparableText(action.topic_title) === normalizeComparableText(topic.title))) {
+    return topic.id;
+  }
+  if (!course?.id || !action.topic_title) return topic?.id;
+
+  try {
+    const courseTopics = await base44.entities.Topic.filter({ course_id: course.id }, "order", 300);
+    const requested = normalizeComparableText(action.topic_title);
+    const matched = courseTopics.find((candidate) => normalizeComparableText(candidate.title) === requested)
+      || courseTopics.find((candidate) => normalizeComparableText(candidate.title).includes(requested) || requested.includes(normalizeComparableText(candidate.title)));
+    return matched?.id || topic?.id;
+  } catch {
+    return topic?.id;
+  }
+}
+
 async function executeAction(action, { course, topic, sessionId }) {
   if (actionNeedsCourse(action) && !course?.id) {
     return { ok: false, label: action.type, message: "No course selected." };
@@ -458,21 +648,26 @@ async function executeAction(action, { course, topic, sessionId }) {
     if (!action.title && !action.content) {
       return { ok: false, label: "task", message: "Task title was empty." };
     }
-    const dueDate = Number.isFinite(action.days_from_now)
-      ? new Date(Date.now() + action.days_from_now * 24 * 60 * 60 * 1000).toISOString()
-      : undefined;
+    const dueDate = parseTaskDueDate(action);
+    const linkedTopicId = await resolveActionTopic({ course, topic, action });
 
     const task = await base44.entities.Task.create({
       course_id: course.id,
-      topic_id: topic?.id,
+      topic_id: linkedTopicId,
       title: action.title || action.content,
+      instructions: action.instructions || action.description || action.content || "Open the linked study session and work through the topic.",
+      outcome: action.outcome || "You can explain the key idea and answer practice questions without notes.",
       type: action.task_type || "study",
       priority: action.priority || "medium",
       due_date: dueDate,
       estimated_minutes: action.estimated_minutes || 30,
+      course_title: action.course_title || course.title,
+      topic_title: action.topic_title || topic?.title,
+      source: "ai_agent",
       status: "todo",
     });
-    return { ok: true, label: "task", message: `Created task: ${task.title}` };
+    const dueLabel = dueDate ? ` due ${new Date(dueDate).toLocaleDateString()}` : "";
+    return { ok: true, label: "task", message: `Created task: ${task.title}${dueLabel}` };
   }
 
   if (action.type === "create_study_guide") {
@@ -492,7 +687,7 @@ async function executeAction(action, { course, topic, sessionId }) {
   }
 
   if (action.type === "create_mindmap") {
-    const nodes = normalizeArray(action.nodes).filter((node) => node?.title);
+    const nodes = normalizeMindMapNodes(action, course, topic);
     if (nodes.length === 0) {
       return { ok: false, label: "mindmap", message: "Mindmap nodes were empty." };
     }
@@ -568,7 +763,7 @@ async function executeAction(action, { course, topic, sessionId }) {
 
 export async function executeStudyActions({ course, topic, sessionId, actions = [] }) {
   const actionResults = [];
-  const sanitizedActions = actions.map(sanitizeAction).filter(Boolean).filter((action) => action.type);
+  const sanitizedActions = normalizeActionList(actions).filter((action) => action.type);
   for (const action of sanitizedActions) {
     try {
       actionResults.push(await executeAction(action, { course, topic, sessionId }));
@@ -596,7 +791,7 @@ export async function runStudyAgent({ course, topic, context, contextBundle, dep
   });
 
   const actions = Array.isArray(result?.actions) ? result.actions : [];
-  const sanitizedActions = actions.map(sanitizeAction).filter(Boolean).slice(0, MAX_AGENT_ACTIONS_PER_TURN);
+  const sanitizedActions = normalizeActionList(actions);
   const skippedActions = Math.max(0, actions.length - sanitizedActions.length);
   const rawReply = typeof result?.reply === "string" && result.reply.trim()
     ? result.reply.trim()
