@@ -52,6 +52,7 @@ async function readZipFiles(arrayBuffer) {
 
 async function extractDocxText(arrayBuffer) {
   const zip = await readZipFiles(arrayBuffer);
+  // DOCX stores the readable body, headers, footers, and notes as OOXML XML parts.
   const entries = Object.keys(zip.files)
     .filter((name) => /^word\/(document|footnotes|endnotes|header\d*|footer\d*)\.xml$/i.test(name))
     .sort((a, b) => a.localeCompare(b));
@@ -71,6 +72,7 @@ async function extractDocxText(arrayBuffer) {
 
 async function extractPptxText(arrayBuffer) {
   const zip = await readZipFiles(arrayBuffer);
+  // PPTX stores each slide as XML; reading those slide parts gives us the real slide text.
   const entries = Object.keys(zip.files)
     .filter((name) => /^ppt\/slides\/slide\d+\.xml$/i.test(name))
     .sort((a, b) => {
@@ -154,6 +156,7 @@ export function chunkText(text, { chunkSize = DEFAULT_CHUNK_SIZE, overlap = DEFA
     return chunks;
   }
 
+  // Keep a small tail/head overlap so the retrieval step can still see context boundaries.
   const overlapped = [];
   for (let index = 0; index < chunks.length; index += 1) {
     const previous = index > 0 ? chunks[index - 1].slice(-overlap) : "";

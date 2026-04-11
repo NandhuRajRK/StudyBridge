@@ -606,6 +606,7 @@ export async function runStudyAgent({ course, topic, context, contextBundle, dep
   const missingContext = normalizeArray(result?.missing_context).map((item) => String(item).trim()).filter(Boolean);
   const pendingActions = sanitizedActions.filter(actionRequiresApproval);
 
+  // Writes are proposed first and only executed after the user explicitly approves them.
   if (approvalRequired && pendingActions.length > 0) {
     return {
       reply: buildPendingApprovalReply({
@@ -662,6 +663,7 @@ export async function runStudyTurn(args) {
   const contextBundle = args.contextBundle || { context: args.context || "", sourceIds: [] };
 
   if (wantsStudyBridgeAction(args.studentText)) {
+    // Deterministic intent routing keeps obvious "save/add/create" requests from relying on the model.
     return runStudyAgent({ ...args, contextBundle, approvalRequired: true });
   }
 
