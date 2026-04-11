@@ -22,6 +22,7 @@ const TRANSLATIONS = {
       library: "Library",
       mindMap: "Mind map",
       aiTutor: "AI Tutor",
+      docs: "Docs",
       settings: "Settings",
     },
     common: {

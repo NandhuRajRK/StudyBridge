@@ -1,7 +1,7 @@
 import { Outlet, Link, useLocation } from "react-router-dom";
 import { 
   LayoutDashboard, BookOpen, Brain, Calendar, 
-  TrendingUp, Library, Bot, Settings, LogOut, GraduationCap, GitBranch
+  TrendingUp, Library, Bot, Settings, LogOut, GraduationCap, GitBranch, FileText
 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { useState, useEffect } from "react";
@@ -17,6 +17,7 @@ const navItems = [
   { path: "/library", labelKey: "nav.library", icon: Library },
   { path: "/mindmap", labelKey: "nav.mindMap", icon: GitBranch },
   { path: "/ai-tutor", labelKey: "nav.aiTutor", icon: Bot },
+  { path: "/docs", labelKey: "nav.docs", icon: FileText },
   { path: "/settings", labelKey: "nav.settings", icon: Settings },
 ];
 

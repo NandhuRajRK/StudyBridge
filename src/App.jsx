@@ -16,6 +16,7 @@ import Planner from './pages/Planner';
 import Progress from './pages/Progress';
 import Library from './pages/Library';
 import MindMap from './pages/MindMap';
+import Docs from './pages/Docs';
 import Settings from './pages/Settings';
 
 const AuthenticatedApp = () => {
@@ -55,6 +56,7 @@ const AuthenticatedApp = () => {
         <Route path="/progress" element={<Progress />} />
         <Route path="/library" element={<Library />} />
         <Route path="/mindmap" element={<MindMap />} />
+        <Route path="/docs" element={<Docs />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
       <Route path="*" element={<PageNotFound />} />

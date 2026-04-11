@@ -1,43 +1,48 @@
 # StudyBridge
 
-StudyBridge is a local-first AI study companion for students. It turns courses, uploads, notes, tasks, quizzes, flashcards, and study sessions into one grounded system instead of a pile of disconnected tools.
+StudyBridge is a local-first AI study companion for students. It keeps courses, uploads, notes, tasks, progress, and AI tutoring in one grounded system instead of scattering them across separate tools.
 
-It is designed for:
+The app is built for:
 
 - Students who need offline or unstable-internet support
-- Students who want one place for materials, notes, progress, and AI tutoring
-- Teachers or mentors who want a clearer study workflow for learners
-- A hackathon / portfolio demo that shows real product utility, not just a chatbot
+- Students who want one place for materials, notes, progress, and study planning
+- Teachers, mentors, and reviewers who want a clear student workflow to evaluate
+- Hackathon and portfolio demos that need a real product story, not just a chatbot
 
 ## What It Does
 
-- AI Tutor with course-aware context and grounded replies
+- AI Tutor with course-aware grounded replies
 - Study sessions with summaries, flashcards, quizzes, notes, and chat
 - Planner with actionable tasks and calendar export
 - Library for materials, notes, saved answers, guides, and chats
-- Mind map creation and export
+- Mind map creation, editing, and export
 - Desktop local AI with `llama.cpp`
-- Optional BYOK cloud AI using a Google API key
+- Optional BYOK cloud AI with a Google API key
 - Optional CLI orchestrators for advanced agent workflows
 
-## Architecture
+## How It Works
 
-StudyBridge uses a layered AI architecture:
+StudyBridge keeps the app in control of the important parts:
 
-- The app builds the course, topic, profile, and upload context itself
-- The model or CLI returns structured JSON
-- StudyBridge validates the output before anything is written
-- Writes and deletes are staged for explicit user approval
-- The local desktop app stores data in SQLite
+- The UI builds course, profile, topic, and upload context
+- The model or CLI returns structured output
+- StudyBridge validates that output before any write happens
+- Writes and deletes are staged for explicit approval
+- Desktop storage uses SQLite and local files
 - The web build can still use Supabase
 
-This means the app keeps control of:
+This lets the app stay:
 
-- data integrity
-- safety limits
-- approvals
-- course-grounded retrieval
-- local-first behavior
+- grounded
+- local-first
+- safer to review
+- easier to explain in a demo
+
+## User Documentation
+
+The full student guide lives inside the app at `Docs`.
+
+For provider-specific setup and official references, use the `Official docs` dropdown in `Settings`.
 
 ## Desktop And Web
 
@@ -46,45 +51,21 @@ This means the app keeps control of:
 - Windows and macOS are the main desktop targets
 - Local AI runs through `llama.cpp`
 - The app auto-selects a Gemma variant based on available memory
-- OpenCode CLI is the preferred open-source background agent path for local Gemma orchestration
+- OpenCode, Gemini CLI, Claude Code, and Codex CLI are optional on-demand providers
 
 ### Web
 
 - The web build can keep using Supabase
-- This is the easiest path for a hosted demo
 - ChromeOS users should use the web/PWA version rather than Electron
 
 ## Official Runtime Docs
 
-- OpenAI Codex CLI: https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan
-- Anthropic Claude / Claude Code starting point: https://docs.anthropic.com/en/docs/quickstart
+- OpenAI Codex CLI: https://help.openai.com/en/articles/11096431-openai-codex-cli-getting-started
+- Anthropic Claude Code: https://docs.anthropic.com/en/docs/claude-code/overview
 - OpenCode docs: https://opencode.ai/docs
-- OpenCode config docs: https://opencode.ai/docs/config
-- Google Gemma docs: https://ai.google.dev/gemma/docs/functiongemma
-- Google Gemini CLI repo/docs: https://github.com/google-gemini/gemini-cli/blob/main/docs/get-started/index.md
-
-Note:
-- Google has a CLI for Gemini models.
-- That is not the same thing as a Gemma runtime.
-- For local Gemma, StudyBridge uses `llama.cpp`.
-
-## Student And Teacher UX
-
-The UI is organized around the student workflow:
-
-- Add a course
-- Upload or create materials
-- Review topics and progress
-- Study with grounded AI
-- Save notes, flashcards, and answers
-- Export study artifacts
-
-Teacher-facing value is simpler:
-
-- The course context is structured
-- Materials and progress are visible
-- Study outputs are reusable
-- The workflow is explainable in a demo or portfolio pitch
+- Google Gemma docs: https://ai.google.dev/gemma/docs/run
+- Google Gemini CLI: https://github.com/google-gemini/gemini-cli
+- Google Gemini API key docs: https://ai.google.dev/gemini-api/docs/api-key
 
 ## Local Setup
 
@@ -139,28 +120,18 @@ npm run build
 npm run lint
 ```
 
-## Implementation Notes
-
-- Desktop storage uses SQLite
-- Material uploads store extracted text and chunked passages
-- AI write actions are staged behind approval
-- Calendar exports use standard ICS / Google Calendar links
-- Flashcards export to Anki-friendly TSV
-- Mind maps export to OPML and Markdown
-
 ## Hackathon Positioning
 
-StudyBridge is a good hackathon submission because it shows:
+StudyBridge is a strong hackathon submission because it shows:
 
 - A real student workflow
 - Offline-first and low-connectivity support
 - Grounded retrieval instead of generic chat
 - Local-first data handling
-- A clear AI architecture that can be explained in a demo
 - Optional cloud AI without forcing it on the user
+- A clear architecture that can be explained in a review or demo
 
 ## License And Liability
 
 StudyBridge is provided as-is, free of charge, without warranty.
 Users should evaluate it for their own environment and risk tolerance before relying on it for important academic or production use.
-
