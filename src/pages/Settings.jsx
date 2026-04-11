@@ -59,6 +59,11 @@ function providerLabel(provider) {
   return getAgentProviderDoc(provider)?.label || provider || "Built-in runtime";
 }
 
+function isProviderInstalled(aiSettings, provider) {
+  if (!provider || provider === "none") return false;
+  return Boolean(aiSettings.installedAgentProviders?.[provider]?.installed);
+}
+
 function serializeAiSettings(settings) {
   return {
     mode: settings.mode,
@@ -124,7 +129,7 @@ export default function Settings() {
             window.studybridgeDesktop.getAiSettings(),
             window.studybridgeDesktop.getRuntimeConfig(),
           ]);
-        setAiSettings(prev => ({ ...prev, ...desktopSettings, googleApiKey: "" }));
+          setAiSettings(prev => ({ ...prev, ...desktopSettings, googleApiKey: "" }));
           setAiRuntime(runtime);
         } catch (error) {
           console.error("Failed to load desktop AI settings", error);
@@ -208,6 +213,10 @@ export default function Settings() {
     setInstallingProvider(true);
     try {
       await window.studybridgeDesktop.installAgentProvider(provider);
+      if (window.studybridgeDesktop?.getAiSettings) {
+        const nextSettings = await window.studybridgeDesktop.getAiSettings();
+        setAiSettings(prev => ({ ...prev, ...nextSettings, googleApiKey: "" }));
+      }
       if (window.studybridgeDesktop?.getRuntimeConfig) {
         setAiRuntime(await window.studybridgeDesktop.getRuntimeConfig());
       }
@@ -373,7 +382,9 @@ export default function Settings() {
                       </p>
                     </div>
                     <span className="text-xs rounded-full bg-primary/10 text-primary px-2 py-1">
-                      {aiRuntime?.status === "ready" ? t("settings.providerReady") : t("settings.providerMissing")}
+                      {isProviderInstalled(aiSettings, aiSettings.agentProvider)
+                        ? t("settings.providerReady")
+                        : t("settings.providerMissing")}
                     </span>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -381,11 +392,11 @@ export default function Settings() {
                       type="button"
                       variant="outline"
                       onClick={handleInstallAgentProvider}
-                      disabled={installingProvider || aiRuntime?.status === "ready"}
+                      disabled={installingProvider || isProviderInstalled(aiSettings, aiSettings.agentProvider)}
                     >
                       {installingProvider
                         ? "Installing..."
-                        : aiRuntime?.status === "ready"
+                        : isProviderInstalled(aiSettings, aiSettings.agentProvider)
                           ? t("settings.providerReady")
                           : t("settings.installSelectedProvider")}
                     </Button>
@@ -494,6 +505,9 @@ export default function Settings() {
                 <p className="font-medium text-foreground">{t("settings.currentState")}</p>
                 <p>Mode: {aiRuntime?.aiMode || aiSettings.mode}</p>
                 {aiRuntime?.provider && <p>External provider: {aiRuntime.provider}</p>}
+                {aiSettings.agentProvider && aiSettings.agentProvider !== "none" && (
+                  <p>Selected provider: {providerLabel(aiSettings.agentProvider)} {isProviderInstalled(aiSettings, aiSettings.agentProvider) ? "(installed)" : "(not installed)"}</p>
+                )}
                 <p>Status: {describeAiStatus(aiRuntime?.status)}</p>
                 {aiSettings.hasGoogleApiKey && <p>Google key: saved on this device</p>}
                 {aiRuntime?.cloudBudget && (

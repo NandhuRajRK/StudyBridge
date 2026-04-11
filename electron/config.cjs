@@ -7,6 +7,7 @@ const DEFAULT_CONFIG = {
     localModelConsent: false,
     cloudProvider: "google",
     agentProvider: "none",
+    installedAgentProviders: {},
     googleApiKey: "",
     googleModel: "gemini-2.5-flash",
     safetyLimits: {
@@ -54,6 +55,7 @@ function mergeConfig(config = {}) {
   const legacyRateLimits = config.ai?.rateLimits || {};
   const safetyLimits = config.ai?.safetyLimits || {};
   const cloudBudget = config.ai?.cloudBudget || {};
+  const installedAgentProviders = config.ai?.installedAgentProviders || {};
 
   return {
     ...structuredClone(DEFAULT_CONFIG),
@@ -61,6 +63,9 @@ function mergeConfig(config = {}) {
     ai: {
       ...structuredClone(DEFAULT_CONFIG.ai),
       ...(config.ai || {}),
+      installedAgentProviders: {
+        ...installedAgentProviders,
+      },
       safetyLimits: {
         ...structuredClone(DEFAULT_CONFIG.ai.safetyLimits),
         ...safetyLimits,

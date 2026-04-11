@@ -131,6 +131,7 @@ function getSafeAiSettings() {
   return {
     ...rest,
     hasGoogleApiKey: Boolean(ai.googleApiKey),
+    installedAgentProviders: ai.installedAgentProviders || {},
     cloudUsage: usage,
     rateLimits: limits,
     safetyLimits,
@@ -419,12 +420,27 @@ ipcMain.handle("studybridge:install-agent-provider", async (_event, provider) =>
   }
 
   const result = await installAgentProvider(provider);
+  const nextInstalledProviders = {
+    ...(appConfig.ai?.installedAgentProviders || {}),
+    [provider]: {
+      installed: true,
+      installedAt: new Date().toISOString(),
+    },
+  };
+  appConfig = await writeConfig(app, {
+    ...appConfig,
+    ai: {
+      ...appConfig.ai,
+      installedAgentProviders: nextInstalledProviders,
+    },
+  });
   if (appConfig.ai?.agentProvider === provider) {
     await syncRuntimeFromConfig();
   }
 
   return {
     provider,
+    installedAgentProviders: nextInstalledProviders,
     ...result,
     runtime: runtimeForRenderer(),
   };

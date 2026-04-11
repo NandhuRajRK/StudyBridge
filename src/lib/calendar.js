@@ -40,8 +40,8 @@ export function formatDateKey(dateKey, pattern = "MMM d") {
   return format(date, pattern);
 }
 
-export function buildTaskCalendarMeta(task, course, topic) {
-  const dateKey = getTaskDateKey(task);
+export function buildTaskCalendarMeta(task, course, topic, fallbackDate = null) {
+  const dateKey = getTaskDateKey(task) || getDateKey(fallbackDate || task?.created_date || new Date());
   const title = [
     task?.title || "Study task",
     course?.title ? `${course.title}` : null,
@@ -129,15 +129,15 @@ export function downloadTextFile(filename, text, mimeType = "text/plain;charset=
   URL.revokeObjectURL(url);
 }
 
-export function openGoogleCalendarTask(task, course, topic) {
-  const meta = buildTaskCalendarMeta(task, course, topic);
+export function openGoogleCalendarTask(task, course, topic, fallbackDate = null) {
+  const meta = buildTaskCalendarMeta(task, course, topic, fallbackDate);
   const url = buildGoogleCalendarUrl(meta);
   if (!url) return;
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
-export function downloadTaskIcs(task, course, topic) {
-  const meta = buildTaskCalendarMeta(task, course, topic);
+export function downloadTaskIcs(task, course, topic, fallbackDate = null) {
+  const meta = buildTaskCalendarMeta(task, course, topic, fallbackDate);
   const ics = buildIcsForTask(meta);
   if (!ics) return;
   const slug = (meta.title || "study-task").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "study-task";

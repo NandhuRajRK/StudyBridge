@@ -43,6 +43,7 @@ export default function CalendarView({ tasks, courses, topics = [] }) {
     const date = dateKeyToDate(dateKey);
     return date && isSameMonth(date, currentMonth);
   });
+  const calendarExportTasks = monthTasks.length > 0 ? monthTasks : tasks;
 
   const taskLink = (task) => {
     if (task.course_id && task.topic_id) return `/study?course=${task.course_id}&topic=${task.topic_id}`;
@@ -51,11 +52,11 @@ export default function CalendarView({ tasks, courses, topics = [] }) {
   };
 
   const exportMonth = () => {
-    if (monthTasks.length === 0) return;
-    const events = monthTasks.map((task) => {
+    if (calendarExportTasks.length === 0) return;
+    const events = calendarExportTasks.map((task) => {
       const course = courses.find((item) => item.id === task.course_id);
       const topic = topics.find((item) => item.id === task.topic_id);
-      return buildTaskCalendarMeta(task, course, topic);
+      return buildTaskCalendarMeta(task, course, topic, selectedDate);
     });
     const ics = buildIcsForEvents(events);
     const slug = format(currentMonth, "yyyy-MM");
@@ -63,11 +64,11 @@ export default function CalendarView({ tasks, courses, topics = [] }) {
   };
 
   const openMonthGoogle = () => {
-    const firstTask = monthTasks[0];
+    const firstTask = calendarExportTasks[0];
     if (!firstTask) return;
     const course = courses.find((item) => item.id === firstTask.course_id);
     const topic = topics.find((item) => item.id === firstTask.topic_id);
-    const meta = buildTaskCalendarMeta(firstTask, course, topic);
+    const meta = buildTaskCalendarMeta(firstTask, course, topic, selectedDate);
     const url = buildGoogleCalendarUrl(meta);
     if (url) window.open(url, "_blank", "noopener,noreferrer");
   };
@@ -90,10 +91,10 @@ export default function CalendarView({ tasks, courses, topics = [] }) {
           <Button variant="outline" size="sm" onClick={() => setCurrentMonth((value) => addMonths(value, 1))} className="gap-2">
             Next <ArrowRight className="w-4 h-4" />
           </Button>
-          <Button variant="outline" size="sm" onClick={exportMonth} disabled={monthTasks.length === 0} className="gap-2">
-            <Download className="w-4 h-4" /> Export .ics
-          </Button>
-          <Button variant="outline" size="sm" onClick={openMonthGoogle} disabled={monthTasks.length === 0} className="gap-2">
+            <Button variant="outline" size="sm" onClick={exportMonth} disabled={calendarExportTasks.length === 0} className="gap-2">
+              <Download className="w-4 h-4" /> Export .ics
+            </Button>
+          <Button variant="outline" size="sm" onClick={openMonthGoogle} disabled={calendarExportTasks.length === 0} className="gap-2">
             <ExternalLink className="w-4 h-4" /> Open first in Google Calendar
           </Button>
         </div>
@@ -206,7 +207,7 @@ export default function CalendarView({ tasks, courses, topics = [] }) {
               const course = courses.find((item) => item.id === task.course_id);
               const topic = topics.find((item) => item.id === task.topic_id);
               const link = taskLink(task);
-              const meta = buildTaskCalendarMeta(task, course, topic);
+              const meta = buildTaskCalendarMeta(task, course, topic, selectedDate);
 
               return (
                 <div key={task.id} className="rounded-lg border bg-background p-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">

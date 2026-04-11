@@ -99,10 +99,10 @@ export default function TaskList({ title, tasks, courses, topics = [], onToggle,
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onSelect={() => openGoogleCalendarTask(task, course, topic)}>
+                        <DropdownMenuItem onSelect={() => openGoogleCalendarTask(task, course, topic, task.created_date || task.updated_date || new Date())}>
                           Open in Google Calendar
                         </DropdownMenuItem>
-                        <DropdownMenuItem onSelect={() => downloadTaskIcs(task, course, topic)}>
+                        <DropdownMenuItem onSelect={() => downloadTaskIcs(task, course, topic, task.created_date || task.updated_date || new Date())}>
                           Download .ics
                         </DropdownMenuItem>
                       </DropdownMenuContent>
