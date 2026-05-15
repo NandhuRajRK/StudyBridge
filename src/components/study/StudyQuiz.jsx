@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { CheckCircle2, XCircle, RotateCcw } from "lucide-react";
 import MarkdownContent from "@/components/ui/markdown-content";
 
@@ -17,11 +19,12 @@ function getSourceLabel(sourceCatalog = [], sourceId) {
   return sourceCatalog.find((source) => source.id === sourceId)?.label || sourceId;
 }
 
-export default function StudyQuiz({ questions, sourceCatalog = [], onQuestionResult, onComplete }) {
+export default function StudyQuiz({ questions, sourceCatalog = [], onQuestionResult, onComplete, onQuestionsChange, openEditorSignal = 0 }) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState(null);
   const [showExplanation, setShowExplanation] = useState(false);
   const [results, setResults] = useState([]);
+  const [managing, setManaging] = useState(false);
   const completionSentRef = useRef(false);
   const hasQuestions = Array.isArray(questions) && questions.length > 0;
 
@@ -33,6 +36,11 @@ export default function StudyQuiz({ questions, sourceCatalog = [], onQuestionRes
     setShowExplanation(false);
     setResults([]);
   }, [hasQuestions, questions]);
+
+  useEffect(() => {
+    if (!openEditorSignal) return;
+    setManaging(true);
+  }, [openEditorSignal]);
 
   useEffect(() => {
     if (!hasQuestions || results.length !== questions.length || completionSentRef.current) return;
@@ -89,6 +97,84 @@ export default function StudyQuiz({ questions, sourceCatalog = [], onQuestionRes
 
   return (
     <div className="p-6 lg:p-8 max-w-xl mx-auto">
+      <div className="mb-4 flex justify-end">
+        <Button type="button" variant="outline" size="sm" onClick={() => setManaging((value) => !value)}>
+          {managing ? "Close editor" : "Manage quiz"}
+        </Button>
+      </div>
+      {managing && (
+        <div className="mb-6 space-y-3 rounded-xl border bg-muted/20 p-3">
+          {questions.map((item, index) => (
+            <div key={`${index}-${item.question || "question"}`} className="space-y-2 rounded-lg border bg-background p-3">
+              <Textarea
+                value={item.question || ""}
+                rows={2}
+                placeholder="Question"
+                onChange={(event) => {
+                  const next = questions.map((qItem, i) => (i === index ? { ...qItem, question: event.target.value } : qItem));
+                  onQuestionsChange?.(next);
+                }}
+              />
+              {(Array.isArray(item.options) ? item.options : []).map((option, optionIndex) => (
+                <Input
+                  key={`${index}-opt-${optionIndex}`}
+                  value={option}
+                  placeholder={`Option ${optionIndex + 1}`}
+                  onChange={(event) => {
+                    const next = questions.map((qItem, i) => {
+                      if (i !== index) return qItem;
+                      const nextOptions = Array.isArray(qItem.options) ? [...qItem.options] : [];
+                      nextOptions[optionIndex] = event.target.value;
+                      return { ...qItem, options: nextOptions };
+                    });
+                    onQuestionsChange?.(next);
+                  }}
+                />
+              ))}
+              <Input
+                value={item.correct || ""}
+                placeholder="Correct option value (exact text)"
+                onChange={(event) => {
+                  const next = questions.map((qItem, i) => (i === index ? { ...qItem, correct: event.target.value } : qItem));
+                  onQuestionsChange?.(next);
+                }}
+              />
+              <Textarea
+                value={item.explanation || ""}
+                rows={2}
+                placeholder="Explanation (optional)"
+                onChange={(event) => {
+                  const next = questions.map((qItem, i) => (i === index ? { ...qItem, explanation: event.target.value } : qItem));
+                  onQuestionsChange?.(next);
+                }}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => onQuestionsChange?.(questions.filter((_, i) => i !== index))}
+              >
+                Remove
+              </Button>
+            </div>
+          ))}
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onQuestionsChange?.([...(questions || []), {
+              question: "New question",
+              options: ["Option A", "Option B", "Option C", "Option D"],
+              correct: "Option A",
+              explanation: "",
+              source_ids: [],
+            }])}
+          >
+            Add question
+          </Button>
+        </div>
+      )}
+      {managing ? null : (
+        <>
       <div className="flex items-center justify-between mb-6">
         <span className="text-sm text-muted-foreground">Question {currentIndex + 1} of {questions.length}</span>
         <span className="text-sm text-muted-foreground">{correctCount} correct</span>
@@ -169,6 +255,8 @@ export default function StudyQuiz({ questions, sourceCatalog = [], onQuestionRes
             {currentIndex === questions.length - 1 ? 'Finish' : 'Next Question'}
           </Button>
         </div>
+      )}
+      </>
       )}
     </div>
   );

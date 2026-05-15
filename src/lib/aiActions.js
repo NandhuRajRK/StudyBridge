@@ -317,7 +317,21 @@ function wantsExplicitNoteCreation(text) {
 
 function wantsStudyBridgeAction(text) {
   return /\b(add|create|make|save|summari[sz]e|turn|plan|remind)\b/i.test(text) &&
-    /\b(topic|topics|note|notes|task|tasks|guide|material|resource|planner|flashcard|quiz|mindmap|mind\s*map)\b/i.test(text);
+    /\b(topic|topics|note|notes|summary|recap|task|tasks|guide|material|resource|planner|flashcard|quiz|mindmap|mind\s*map)\b/i.test(text);
+}
+
+function classifyTurnIntent(text = "") {
+  const raw = String(text || "");
+  if (isPendingActionApproval(raw)) return "approval";
+  if (isPendingActionCancellation(raw)) return "cancel";
+  if (wantsStudyBridgeAction(raw)) return "write";
+  return "chat";
+}
+
+function extractSessionSummary(context = "") {
+  const text = String(context || "");
+  const match = text.match(/\[session-summary\]\s*([\s\S]*?)(?:\n\n\[[a-z0-9_-]+\]|\s*$)/i);
+  return match?.[1]?.trim() || "";
 }
 
 export function isPendingActionApproval(text) {
@@ -551,11 +565,14 @@ async function runDeterministicActions({ course, topic, context, studentText, se
   }
 
   if (wantsExplicitNoteCreation(studentText) && /this|chat|conversation|all of this|above|summary|recap/i.test(studentText)) {
+    const summaryFromSession = extractSessionSummary(context);
     const action = {
       type: "create_note",
-      title: `${topic?.title || course.title} AI notes`,
-      content: capText(context, 8000),
-      tags: ["ai-generated"],
+      title: /summary|recap/i.test(studentText)
+        ? `${topic?.title || course.title} summary`
+        : `${topic?.title || course.title} AI notes`,
+      content: capText(summaryFromSession || context, 8000),
+      tags: /summary|recap/i.test(studentText) ? ["summary", "study-session"] : ["ai-generated"],
     };
     if (approvalRequired) {
       return {
@@ -872,8 +889,9 @@ export async function runStudyAgent({ course, topic, context, contextBundle, dep
 export async function runStudyTurn(args) {
   const contextBundle = args.contextBundle || { context: args.context || "", sourceIds: [], sourceCatalog: [] };
   const sourceCatalog = contextBundle?.sourceCatalog || [];
+  const intent = classifyTurnIntent(args.studentText);
 
-  if (wantsStudyBridgeAction(args.studentText)) {
+  if (intent === "write") {
     // Deterministic intent routing keeps obvious "save/add/create" requests from relying on the model.
     return runStudyAgent({ ...args, contextBundle, approvalRequired: true });
   }

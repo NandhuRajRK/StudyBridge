@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ArrowRight, BookOpen, Brain, Clock, GitBranch, History, Layers3, Loader2, MessageSquare, PanelRightClose, PanelRightOpen, Paperclip, Pause, Plus, Send, Sparkles, Square, Wand2 } from "lucide-react";
+import { ArrowRight, BookOpen, Brain, Clock, History, Layers3, Loader2, MessageSquare, PanelRightClose, PanelRightOpen, Paperclip, Pause, Plus, Send, Sparkles, Square, Wand2 } from "lucide-react";
 import { buildStudyModeGuidance, loadStudyContextBundle } from "@/lib/aiContext";
 import { executeStudyActions, getRecoverablePendingActions, isPendingActionApproval, isPendingActionCancellation, runStudyTurn } from "@/lib/aiActions";
 import { listAIConversations, loadAIConversation, saveAIAnswer, saveAIConversation } from "@/lib/aiConversations";
@@ -22,7 +22,9 @@ import StudyNotes from "@/components/study/StudyNotes";
 import ReviewModePanel from "@/components/study/ReviewModePanel";
 import MaterialUploader from "@/components/courses/MaterialUploader";
 import { buildReviewOutcomePlan, buildReviewTaskPayload, getReviewTasks, normalizeConfidence, normalizeSourceIds, shouldPersistReviewTask, sortReviewTasks } from "@/lib/studyReview";
-import { openGoogleCalendarTask } from "@/lib/calendar";
+import RichTextEditor from "@/components/ui/rich-text-editor";
+import { normalizeRichTextInput } from "@/lib/richText";
+import MindMap from "@/pages/MindMap";
 
 const WORKBENCH_SOURCE = "study_workbench";
 const WORKBENCH_STATE_KEY = "studybridge:workbench-state:v1";
@@ -84,7 +86,6 @@ const newMessage = (role, content, extras = {}) => ({
 });
 
 const isCourseTopicReady = (course, topic) => Boolean(course?.id && topic?.id);
-
 function readWorkbenchState() {
   if (typeof window === "undefined") return null;
   try {
@@ -118,7 +119,7 @@ function clearWorkbenchState() {
 function normalizePersistedArtifacts(artifacts) {
   const value = artifacts && typeof artifacts === "object" ? artifacts : {};
   return {
-    summary: typeof value.summary === "string" ? value.summary : null,
+    summary: typeof value.summary === "string" ? normalizeRichTextInput(value.summary) : null,
     flashcards: Array.isArray(value.flashcards) ? value.flashcards : [],
     quiz: Array.isArray(value.quiz) ? value.quiz : [],
     sourceCatalog: Array.isArray(value.sourceCatalog) ? value.sourceCatalog : [],
@@ -146,6 +147,38 @@ function ArtifactPlaceholder({ title, body, action }) {
       {action}
     </div>
   );
+}
+
+function stripTutorMetaFooter(text = "") {
+  return String(text || "")
+    .replace(/\n{2}\*\*Grounding\*\*:[\s\S]*$/i, "")
+    .replace(/\n{2}\*\*Missing context\*\*:[\s\S]*$/i, "")
+    .replace(/\n{2}\*\*Next step\*\*:[\s\S]*$/i, "")
+    .trim();
+}
+
+function buildSessionArtifactContext(generatedContent = {}) {
+  const parts = [];
+  if (generatedContent?.summary) {
+    parts.push(`[session-summary]\n${generatedContent.summary}`);
+  }
+  if (Array.isArray(generatedContent?.flashcards) && generatedContent.flashcards.length > 0) {
+    parts.push(
+      `[session-flashcards]\n${generatedContent.flashcards
+        .slice(0, 20)
+        .map((card, index) => `- ${index + 1}. Q: ${card.front || ""} | A: ${card.back || ""}`)
+        .join("\n")}`,
+    );
+  }
+  if (Array.isArray(generatedContent?.quiz) && generatedContent.quiz.length > 0) {
+    parts.push(
+      `[session-quiz]\n${generatedContent.quiz
+        .slice(0, 20)
+        .map((q, index) => `- ${index + 1}. ${q.question || ""} | correct: ${q.correct || ""}`)
+        .join("\n")}`,
+    );
+  }
+  return parts.join("\n\n").trim();
 }
 
 function getItemSourceIds(item = {}, fallback = [], allowed = []) {
@@ -250,6 +283,25 @@ export default function StudyWorkbench() {
     usePersistedState && typeof persistedState?.selectedArtifactTab === "string" ? persistedState.selectedArtifactTab : "summary"
   ));
   const [mindmaps, setMindmaps] = useState([]);
+  const [mindmapTitleDrafts, setMindmapTitleDrafts] = useState({});
+  const [summaryCandidates, setSummaryCandidates] = useState([]);
+  const [deckCandidates, setDeckCandidates] = useState([]);
+  const [quizCandidates, setQuizCandidates] = useState([]);
+  const [quizQuestionRows, setQuizQuestionRows] = useState([]);
+  const [selectedSummaryItem, setSelectedSummaryItem] = useState("");
+  const [selectedDeckItem, setSelectedDeckItem] = useState("");
+  const [selectedQuizItem, setSelectedQuizItem] = useState("");
+  const [summaryEditorToken, setSummaryEditorToken] = useState(0);
+  const [cardsEditorSignal, setCardsEditorSignal] = useState(0);
+  const [quizEditorSignal, setQuizEditorSignal] = useState(0);
+  const [manualCardDialogOpen, setManualCardDialogOpen] = useState(false);
+  const [manualCardFront, setManualCardFront] = useState("");
+  const [manualCardBack, setManualCardBack] = useState("");
+  const [manualQuizDialogOpen, setManualQuizDialogOpen] = useState(false);
+  const [manualQuizQuestion, setManualQuizQuestion] = useState("");
+  const [manualQuizOptions, setManualQuizOptions] = useState(["Option A", "Option B", "Option C", "Option D"]);
+  const [manualQuizCorrect, setManualQuizCorrect] = useState("Option A");
+  const [manualQuizExplanation, setManualQuizExplanation] = useState("");
   const [chatSidebarOpen, setChatSidebarOpen] = useState(() => !(usePersistedState && persistedState?.chatSidebarOpen === false));
   const [showAttachMaterial, setShowAttachMaterial] = useState(false);
   const [completionDialogOpen, setCompletionDialogOpen] = useState(false);
@@ -355,6 +407,60 @@ export default function StudyWorkbench() {
       })
       .catch((error) => console.error("Failed to load mindmaps", error));
   }, [selectedCourseId, selectedTopicId]);
+
+  useEffect(() => {
+    if (!selectedCourseId) {
+      setSummaryCandidates([]);
+      setDeckCandidates([]);
+      setQuizCandidates([]);
+      setQuizQuestionRows([]);
+      setSelectedSummaryItem("");
+      setSelectedDeckItem("");
+      setSelectedQuizItem("");
+      return;
+    }
+
+    const loadExistingArtifacts = async () => {
+      const [notes, guides, decks, quizzes, questions] = await Promise.all([
+        studybridge.entities.Note.filter({ course_id: selectedCourseId }, "-created_date", 100),
+        studybridge.entities.StudyGuide.filter({ course_id: selectedCourseId }, "-updated_date", 100),
+        studybridge.entities.FlashcardDeck.filter({ course_id: selectedCourseId }, "-created_date", 100),
+        studybridge.entities.Quiz.filter({ course_id: selectedCourseId }, "-created_date", 100),
+        studybridge.entities.QuizQuestion.filter({ course_id: selectedCourseId }, "order", 500),
+      ]);
+
+      const topicScoped = (rows) => (
+        selectedTopicId ? rows.filter((row) => !row.topic_id || row.topic_id === selectedTopicId) : rows
+      );
+
+      const scopedNotes = topicScoped(notes);
+      const scopedGuides = topicScoped(guides).filter((guide) => guide.source !== "mindmap");
+      const scopedDecks = topicScoped(decks);
+      const scopedQuizzes = topicScoped(quizzes);
+
+      setSummaryCandidates([
+        ...scopedNotes.map((note) => ({ key: `note:${note.id}`, label: `Note: ${note.title || "Untitled"}`, item: note })),
+        ...scopedGuides.map((guide) => ({ key: `guide:${guide.id}`, label: `Guide: ${guide.title || "Untitled"}`, item: guide })),
+      ]);
+      setDeckCandidates(scopedDecks);
+      setQuizCandidates(scopedQuizzes);
+      setQuizQuestionRows(questions);
+    };
+
+    loadExistingArtifacts().catch((error) => console.error("Failed to load existing study artifacts", error));
+  }, [selectedCourseId, selectedTopicId]);
+
+  useEffect(() => {
+    setMindmapTitleDrafts((current) => {
+      const next = { ...current };
+      mindmaps.forEach((mapItem) => {
+        if (!(mapItem.id in next)) {
+          next[mapItem.id] = mapItem.title || "Untitled mind map";
+        }
+      });
+      return next;
+    });
+  }, [mindmaps]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -476,6 +582,14 @@ export default function StudyWorkbench() {
     setCompletionRestartRequested(reason === "timer_elapsed");
     setCompletionRestartMinutes(String(Math.max(1, remainingMinutesInput || 25)));
     setCompletionDialogOpen(true);
+  };
+
+  const handleExitWorkspace = () => {
+    if (session?.status === "active") {
+      openSessionCompletionDialog({ reason: "manual_stop" });
+      return;
+    }
+    clearWorkspaceState();
   };
 
   const clearWorkspaceState = () => {
@@ -726,11 +840,6 @@ export default function StudyWorkbench() {
     });
   };
 
-  const openReviewCalendar = (task = activeReviewTask || nextUpcomingReviewTask) => {
-    if (!task) return;
-    openGoogleCalendarTask(task, selectedCourse, selectedTopic);
-  };
-
   const completeReviewAttempt = async ({ task, outcome, confidence }) => {
     if (!task?.id || !selectedTopic?.id) return null;
 
@@ -976,7 +1085,7 @@ Return as JSON with this structure:
       const quiz = normalizeArtifactQuiz(result.quiz || [], allowedSourceIds, summarySourceIds);
 
       return {
-        summary: result.summary || "No summary returned.",
+        summary: normalizeRichTextInput(result.summary || "No summary returned."),
         summarySourceIds,
         flashcards,
         quiz,
@@ -997,6 +1106,149 @@ Return as JSON with this structure:
     } finally {
       setGeneratingContent(false);
     }
+  };
+
+  const regenerateArtifacts = async () => {
+    if (!selectedCourse?.id || !selectedTopic?.id || workspaceBusy || aiUnavailable || !session?.id) return;
+    const artifacts = await generateArtifacts(selectedCourse, selectedTopic, studyMode);
+    setGeneratedContent(artifacts);
+  };
+
+  const formatGuideAsSummary = (guide) => {
+    const concepts = Array.isArray(guide?.key_concepts) ? guide.key_concepts.filter(Boolean) : [];
+    const sections = Array.isArray(guide?.sections) ? guide.sections : [];
+    const sectionLines = sections
+      .slice(0, 30)
+      .map((section) => {
+        if (typeof section === "string") return `- ${section}`;
+        if (!section || typeof section !== "object") return "";
+        const title = section.title || section.heading || section.label || "Section";
+        const note = section.note || section.content || section.text || "";
+        return `- **${title}**${note ? `: ${note}` : ""}`;
+      })
+      .filter(Boolean);
+    const markdown = [
+      `# ${guide?.title || "Study guide summary"}`,
+      concepts.length > 0 ? `## Key concepts\n${concepts.map((item) => `- ${item}`).join("\n")}` : "",
+      sectionLines.length > 0 ? `## Sections\n${sectionLines.join("\n")}` : "",
+    ].filter(Boolean).join("\n\n");
+    return normalizeRichTextInput(markdown);
+  };
+
+  const updateSummaryContent = (nextSummary) => {
+    setGeneratedContent((prev) => ({ ...prev, summary: normalizeRichTextInput(nextSummary) }));
+  };
+
+  const updateFlashcardsContent = (nextCards) => {
+    setGeneratedContent((prev) => ({
+      ...prev,
+      flashcards: Array.isArray(nextCards) ? nextCards : [],
+    }));
+  };
+
+  const updateQuizContent = (nextQuestions) => {
+    setGeneratedContent((prev) => ({
+      ...prev,
+      quiz: Array.isArray(nextQuestions) ? nextQuestions : [],
+    }));
+  };
+
+  const loadSelectedSummaryCandidate = (value) => {
+    setSelectedSummaryItem(value);
+    if (!value) return;
+    const selected = summaryCandidates.find((candidate) => candidate.key === value);
+    if (!selected) return;
+    if (value.startsWith("note:")) {
+      setGeneratedContent((prev) => ({ ...prev, summary: normalizeRichTextInput(selected.item?.content || "") }));
+      return;
+    }
+    if (value.startsWith("guide:")) {
+      setGeneratedContent((prev) => ({ ...prev, summary: formatGuideAsSummary(selected.item) }));
+    }
+  };
+
+  const loadSelectedDeck = (value) => {
+    setSelectedDeckItem(value);
+    if (!value) return;
+    const deck = deckCandidates.find((item) => item.id === value);
+    if (!deck) return;
+    const deckCards = Array.isArray(deck.cards)
+      ? deck.cards
+      : Array.isArray(deck.flashcards)
+        ? deck.flashcards
+        : [];
+    setGeneratedContent((prev) => ({ ...prev, flashcards: normalizeArtifactFlashcards(deckCards, [], prev.summarySourceIds || []) }));
+  };
+
+  const loadSelectedQuiz = (value) => {
+    setSelectedQuizItem(value);
+    if (!value) return;
+    const quiz = quizCandidates.find((item) => item.id === value);
+    if (!quiz) return;
+    const questions = quizQuestionRows
+      .filter((row) => row.quiz_id === quiz.id)
+      .map((row) => ({
+        question: row.question || "",
+        options: Array.isArray(row.options) ? row.options : [],
+        correct: row.correct || "",
+        explanation: row.explanation || "",
+        source_ids: [],
+      }));
+    setGeneratedContent((prev) => ({ ...prev, quiz: normalizeArtifactQuiz(questions, [], prev.summarySourceIds || []) }));
+  };
+
+  const addManualCardFromDialog = () => {
+    const front = manualCardFront.trim();
+    const back = manualCardBack.trim();
+    if (!front || !back) return;
+    updateFlashcardsContent([...(generatedContent.flashcards || []), { front, back, source_ids: [] }]);
+    setManualCardFront("");
+    setManualCardBack("");
+    setManualCardDialogOpen(false);
+    setCardsEditorSignal((value) => value + 1);
+  };
+
+  const addManualQuizFromDialog = () => {
+    const question = manualQuizQuestion.trim();
+    const options = manualQuizOptions.map((item) => String(item || "").trim()).filter(Boolean);
+    const correct = manualQuizCorrect.trim();
+    if (!question || options.length < 2 || !correct) return;
+    updateQuizContent([...(generatedContent.quiz || []), {
+      question,
+      options,
+      correct,
+      explanation: manualQuizExplanation.trim(),
+      source_ids: [],
+    }]);
+    setManualQuizQuestion("");
+    setManualQuizOptions(["Option A", "Option B", "Option C", "Option D"]);
+    setManualQuizCorrect("Option A");
+    setManualQuizExplanation("");
+    setManualQuizDialogOpen(false);
+    setQuizEditorSignal((value) => value + 1);
+  };
+
+  const createMindmapDraft = async () => {
+    if (!selectedCourse?.id) return;
+    const created = await studybridge.entities.StudyGuide.create({
+      course_id: selectedCourse.id,
+      topic_id: selectedTopic?.id,
+      title: `${selectedTopic?.title || selectedCourse.title} mind map`,
+      difficulty: "custom",
+      key_concepts: [],
+      sections: [],
+      source: "mindmap",
+    });
+    const rows = await studybridge.entities.StudyGuide.filter({ course_id: selectedCourse.id, source: "mindmap" }, "-updated_date", 30);
+    setMindmaps(selectedTopic?.id ? rows.filter((row) => !row.topic_id || row.topic_id === selectedTopic.id) : rows);
+    setMindmapTitleDrafts((prev) => ({ ...prev, [created.id]: created.title || "Untitled mind map" }));
+  };
+
+  const saveMindmapTitle = async (mapItem) => {
+    const nextTitle = String(mindmapTitleDrafts[mapItem.id] || "").trim();
+    if (!nextTitle) return;
+    await studybridge.entities.StudyGuide.update(mapItem.id, { title: nextTitle });
+    setMindmaps((prev) => prev.map((item) => (item.id === mapItem.id ? { ...item, title: nextTitle } : item)));
   };
 
   const startWorkbench = async () => {
@@ -1119,10 +1371,26 @@ Return as JSON with this structure:
     setLoading(true);
     try {
       const contextBundle = await loadStudyContextBundle({ course: selectedCourse, topic: selectedTopic });
+      const sessionArtifactsContext = buildSessionArtifactContext(generatedContent);
+      const mergedContext = sessionArtifactsContext
+        ? `${contextBundle.context}\n\n[session-artifacts]\n${sessionArtifactsContext}`
+        : contextBundle.context;
       const turnResult = await runStudyTurn({
         course: selectedCourse,
         topic: selectedTopic,
-        contextBundle,
+        contextBundle: {
+          ...contextBundle,
+          context: mergedContext,
+          sourceIds: (contextBundle.sourceIds || []).includes("session-artifacts")
+            ? (contextBundle.sourceIds || [])
+            : [...(contextBundle.sourceIds || []), "session-artifacts"],
+          sourceCatalog: (contextBundle.sourceCatalog || []).some((source) => source.id === "session-artifacts")
+            ? (contextBundle.sourceCatalog || [])
+            : [
+              ...(contextBundle.sourceCatalog || []),
+              { id: "session-artifacts", label: "Session artifacts", detail: "Manual and generated summary/cards/quiz from this active study session." },
+            ],
+        },
         depth,
         history: historyBeforeTurn,
         studentText: userMessage.content,
@@ -1130,9 +1398,10 @@ Return as JSON with this structure:
         studyMode,
       });
       const nextPendingActions = Array.isArray(turnResult?.pendingActions) ? turnResult.pendingActions : [];
+      const cleanReply = stripTutorMetaFooter(turnResult.reply);
       const messagesWithAssistant = [
         ...messagesWithUser,
-        newMessage("assistant", turnResult.reply, {
+        newMessage("assistant", cleanReply, {
           pendingActions: nextPendingActions,
           grounding: turnResult.grounding || [],
           nextStep: turnResult.nextStep || "",
@@ -1440,6 +1709,14 @@ Return as JSON with this structure:
                 >
                   <Square className="h-4 w-4" />
                 </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExitWorkspace}
+                  disabled={workspaceBusy}
+                >
+                  Exit
+                </Button>
               </div>
             </header>
 
@@ -1458,6 +1735,29 @@ Return as JSON with this structure:
 
                   <div className="flex-1 overflow-hidden">
                     <TabsContent value="summary" forceMount className="m-0 h-full overflow-y-auto">
+                      <div className="mb-3 flex flex-wrap items-center gap-2 px-2">
+                        <select
+                          value={selectedSummaryItem}
+                          onChange={(event) => loadSelectedSummaryCandidate(event.target.value)}
+                          className="h-9 min-w-[260px] rounded-md border bg-background px-3 text-sm"
+                        >
+                          <option value="">Load existing summary/note...</option>
+                          {summaryCandidates.map((candidate) => (
+                            <option key={candidate.key} value={candidate.key}>{candidate.label}</option>
+                          ))}
+                        </select>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            updateSummaryContent(generatedContent.summary || `# ${selectedTopic?.title || "Summary"}\n\nWrite your summary here.`);
+                            setSummaryEditorToken((value) => value + 1);
+                          }}
+                        >
+                          Add manual summary
+                        </Button>
+                      </div>
                       {generatedContent.summary ? (
                         <StudySummary
                           content={generatedContent.summary}
@@ -1465,20 +1765,49 @@ Return as JSON with this structure:
                           course={selectedCourse}
                           sources={generatedContent.sourceCatalog || []}
                           sourceIds={generatedContent.summarySourceIds || []}
+                          onContentChange={updateSummaryContent}
+                          forceEditToken={summaryEditorToken}
                         />
                       ) : (
                         <ArtifactPlaceholder
                           title="No summary yet"
-                          body={session?.id ? "Ask the tutor to prepare a new overview." : "Start the session to generate a course-grounded summary."}
+                          body={session?.id ? "Generate a summary for this topic." : "Start the session to generate a course-grounded summary."}
+                          action={session?.id ? (
+                            <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => void regenerateArtifacts()} disabled={workspaceBusy || aiUnavailable}>
+                              Generate now
+                            </Button>
+                          ) : null}
                         />
                       )}
                     </TabsContent>
 
                     <TabsContent value="flashcards" forceMount className="m-0 h-full overflow-y-auto">
+                      <div className="mb-3 flex flex-wrap items-center gap-2 px-2">
+                        <select
+                          value={selectedDeckItem}
+                          onChange={(event) => loadSelectedDeck(event.target.value)}
+                          className="h-9 min-w-[260px] rounded-md border bg-background px-3 text-sm"
+                        >
+                          <option value="">Load existing flashcard deck...</option>
+                          {deckCandidates.map((deck) => (
+                            <option key={deck.id} value={deck.id}>{deck.title || "Untitled deck"}</option>
+                          ))}
+                        </select>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setManualCardDialogOpen(true)}
+                        >
+                          Add manual card
+                        </Button>
+                      </div>
                       {generatedContent.flashcards.length > 0 ? (
                         <StudyFlashcards
                           cards={generatedContent.flashcards}
                           sourceCatalog={generatedContent.sourceCatalog || []}
+                          onCardsChange={updateFlashcardsContent}
+                          openEditorSignal={cardsEditorSignal}
                           courseId={selectedCourse?.id}
                           topicId={selectedTopic?.id}
                           onCardResult={(result) => {
@@ -1488,16 +1817,43 @@ Return as JSON with this structure:
                       ) : (
                         <ArtifactPlaceholder
                           title="No flashcards yet"
-                          body={session?.id ? "Ask the tutor for flashcards." : "Start the session to generate flashcards."}
+                          body={session?.id ? "Generate flashcards for this topic." : "Start the session to generate flashcards."}
+                          action={session?.id ? (
+                            <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => void regenerateArtifacts()} disabled={workspaceBusy || aiUnavailable}>
+                              Generate now
+                            </Button>
+                          ) : null}
                         />
                       )}
                     </TabsContent>
 
                     <TabsContent value="quiz" forceMount className="m-0 h-full overflow-y-auto">
+                      <div className="mb-3 flex flex-wrap items-center gap-2 px-2">
+                        <select
+                          value={selectedQuizItem}
+                          onChange={(event) => loadSelectedQuiz(event.target.value)}
+                          className="h-9 min-w-[260px] rounded-md border bg-background px-3 text-sm"
+                        >
+                          <option value="">Load existing quiz...</option>
+                          {quizCandidates.map((quiz) => (
+                            <option key={quiz.id} value={quiz.id}>{quiz.title || "Untitled quiz"}</option>
+                          ))}
+                        </select>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setManualQuizDialogOpen(true)}
+                        >
+                          Add manual question
+                        </Button>
+                      </div>
                       {generatedContent.quiz.length > 0 ? (
                         <StudyQuiz
                           questions={generatedContent.quiz}
                           sourceCatalog={generatedContent.sourceCatalog || []}
+                          onQuestionsChange={updateQuizContent}
+                          openEditorSignal={quizEditorSignal}
                           courseId={selectedCourse?.id}
                           topicId={selectedTopic?.id}
                           onQuestionResult={(result) => {
@@ -1507,7 +1863,12 @@ Return as JSON with this structure:
                       ) : (
                         <ArtifactPlaceholder
                           title="No quiz yet"
-                          body={session?.id ? "Ask the tutor to generate a quiz." : "Start the session to generate quiz questions."}
+                          body={session?.id ? "Generate a quiz for this topic." : "Start the session to generate quiz questions."}
+                          action={session?.id ? (
+                            <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => void regenerateArtifacts()} disabled={workspaceBusy || aiUnavailable}>
+                              Generate now
+                            </Button>
+                          ) : null}
                         />
                       )}
                     </TabsContent>
@@ -1524,42 +1885,16 @@ Return as JSON with this structure:
                     </TabsContent>
 
                     <TabsContent value="mindmap" forceMount className="m-0 h-full overflow-y-auto">
-                      <div className="space-y-4 p-1">
-                        <div className="rounded-2xl border bg-card px-4 py-3">
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div>
-                              <p className="text-sm font-medium">Mind map workspace</p>
-                              <p className="text-xs text-muted-foreground">
-                                Open the visual editor to expand connections and save map revisions for this course.
-                              </p>
-                            </div>
-                            <Button asChild variant="outline" size="sm" className="gap-2">
-                              <Link to={selectedCourse?.id ? `/mindmap?course=${selectedCourse.id}` : "/mindmap"}>
-                                <GitBranch className="h-4 w-4" />
-                                Open mind map
-                              </Link>
-                            </Button>
-                          </div>
+                      {selectedCourse?.id ? (
+                        <div className="h-full overflow-hidden rounded-2xl border bg-background">
+                          <MindMap forcedCourseId={selectedCourse.id} />
                         </div>
-
-                        {mindmaps.length > 0 ? (
-                          <div className="space-y-2">
-                            {mindmaps.slice(0, 8).map((mapItem) => (
-                              <div key={mapItem.id} className="rounded-xl border bg-card px-3 py-2">
-                                <p className="text-sm font-medium">{mapItem.title || "Untitled mind map"}</p>
-                                <p className="text-xs text-muted-foreground">
-                                  Updated {mapItem.updated_date ? new Date(mapItem.updated_date).toLocaleString() : "recently"}
-                                </p>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <ArtifactPlaceholder
-                            title="No saved mind map yet"
-                            body="Open the mind map editor, build a map for this topic, and save it. Your saved maps will appear here."
-                          />
-                        )}
-                      </div>
+                      ) : (
+                        <ArtifactPlaceholder
+                          title="Mind map needs a course"
+                          body="Pick a course first, then the full mind map editor will load in this tab."
+                        />
+                      )}
                     </TabsContent>
                   </div>
                 </Tabs>
@@ -1649,7 +1984,6 @@ Return as JSON with this structure:
                                 void completeReviewAttempt({ task: reviewTask, outcome: "incorrect", confidence: reviewConfidence });
                               }}
                               onStartWorkedExample={() => startWorkedExampleRetry(reviewTask)}
-                              onAddToCalendar={() => openReviewCalendar(reviewTask)}
                               onExit={() => exitReviewMode(true)}
                             />
 
@@ -1856,6 +2190,52 @@ Return as JSON with this structure:
                 </Button>
               </DialogFooter>
             </form>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={manualCardDialogOpen} onOpenChange={setManualCardDialogOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Add Manual Card</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-2">
+              <Label htmlFor="manual-card-front">Front</Label>
+              <Input id="manual-card-front" value={manualCardFront} onChange={(event) => setManualCardFront(event.target.value)} />
+              <Label htmlFor="manual-card-back">Back</Label>
+              <RichTextEditor value={manualCardBack} onChange={setManualCardBack} placeholder="Card answer..." />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setManualCardDialogOpen(false)}>Cancel</Button>
+              <Button type="button" onClick={addManualCardFromDialog}>Add card</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={manualQuizDialogOpen} onOpenChange={setManualQuizDialogOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Add Manual Question</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-2">
+              <Label htmlFor="manual-quiz-question">Question</Label>
+              <RichTextEditor value={manualQuizQuestion} onChange={setManualQuizQuestion} placeholder="Question..." />
+              {manualQuizOptions.map((value, index) => (
+                <Input
+                  key={`manual-option-${index}`}
+                  value={value}
+                  onChange={(event) => setManualQuizOptions((prev) => prev.map((item, i) => (i === index ? event.target.value : item)))}
+                  placeholder={`Option ${index + 1}`}
+                />
+              ))}
+              <Label htmlFor="manual-quiz-correct">Correct option text</Label>
+              <Input id="manual-quiz-correct" value={manualQuizCorrect} onChange={(event) => setManualQuizCorrect(event.target.value)} />
+              <Label htmlFor="manual-quiz-explanation">Explanation (optional)</Label>
+              <RichTextEditor value={manualQuizExplanation} onChange={setManualQuizExplanation} placeholder="Explanation (optional)..." />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setManualQuizDialogOpen(false)}>Cancel</Button>
+              <Button type="button" onClick={addManualQuizFromDialog}>Add question</Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>

@@ -190,10 +190,9 @@ ${context}`,
     <div className="h-full overflow-hidden bg-background">
       <div className="flex h-full min-h-0 w-full flex-col gap-6 p-6 lg:p-8">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold">{t("nav.planner")}</h1>
-            <p className="text-sm text-muted-foreground mt-1">{activeTasks.length} active tasks</p>
-          </div>
+        <div>
+          <h1 className="text-2xl font-semibold">{t("nav.planner")}</h1>
+        </div>
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={generateStudyPlan} disabled={generatingPlan || aiUnavailable} className="gap-2">
               {generatingPlan ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lightbulb className="w-4 h-4" />}

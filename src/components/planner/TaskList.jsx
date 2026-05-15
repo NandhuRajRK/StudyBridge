@@ -1,9 +1,8 @@
 import { Link } from "react-router-dom";
-import { CheckCircle2, Circle, Trash2, Clock, ArrowRight, CalendarDays } from "lucide-react";
+import { CheckCircle2, Circle, Trash2, Clock, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { downloadTaskIcs, openGoogleCalendarTask, formatDateKey, getTaskDateKey } from "@/lib/calendar";
+import { formatDateKey, getTaskDateKey } from "@/lib/calendar";
 
 export default function TaskList({ title, tasks, courses, topics = [], onToggle, onDelete, variant }) {
   if (tasks.length === 0) return null;
@@ -103,23 +102,6 @@ export default function TaskList({ title, tasks, courses, topics = [], onToggle,
                     </Button>
                   ) : (
                     <Button size="sm" variant="outline" disabled>No link</Button>
-                  )}
-                  {task.due_date && (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button size="sm" variant="outline" className="gap-1.5">
-                          <CalendarDays className="w-3.5 h-3.5" /> Calendar
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onSelect={() => openGoogleCalendarTask(task, course, topic, task.created_date || task.updated_date || new Date())}>
-                          Open in Google Calendar
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onSelect={() => downloadTaskIcs(task, course, topic, task.created_date || task.updated_date || new Date())}>
-                          Download .ics
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
                   )}
                   <button
                     onClick={() => onDelete(task.id)}

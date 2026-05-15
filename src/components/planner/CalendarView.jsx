@@ -11,9 +11,9 @@ import {
   startOfMonth,
   startOfWeek,
 } from "date-fns";
-import { ArrowLeft, ArrowRight, CalendarDays, Download, ExternalLink } from "lucide-react";
+import { ArrowLeft, ArrowRight, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { buildIcsForEvents, buildTaskCalendarMeta, buildGoogleCalendarUrl, dateKeyToDate, downloadTextFile, getTaskDateKey } from "@/lib/calendar";
+import { buildIcsForEvents, buildTaskCalendarMeta, dateKeyToDate, downloadTextFile, getTaskDateKey } from "@/lib/calendar";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -63,16 +63,6 @@ export default function CalendarView({ tasks, courses, topics = [], onCreateTask
     downloadTextFile(`studybridge-${slug}.ics`, ics, "text/calendar;charset=utf-8");
   };
 
-  const openMonthGoogle = () => {
-    const firstTask = calendarExportTasks[0];
-    if (!firstTask) return;
-    const course = courses.find((item) => item.id === firstTask.course_id);
-    const topic = topics.find((item) => item.id === firstTask.topic_id);
-    const meta = buildTaskCalendarMeta(firstTask, course, topic, selectedDate);
-    const url = buildGoogleCalendarUrl(meta);
-    if (url) window.open(url, "_blank", "noopener,noreferrer");
-  };
-
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -94,9 +84,6 @@ export default function CalendarView({ tasks, courses, topics = [], onCreateTask
             <Button variant="outline" size="sm" onClick={exportMonth} disabled={calendarExportTasks.length === 0} className="gap-2">
               <Download className="w-4 h-4" /> Export .ics
             </Button>
-          <Button variant="outline" size="sm" onClick={openMonthGoogle} disabled={calendarExportTasks.length === 0} className="gap-2">
-            <ExternalLink className="w-4 h-4" /> Open first in Google Calendar
-          </Button>
         </div>
       </div>
 
@@ -234,19 +221,6 @@ export default function CalendarView({ tasks, courses, topics = [], onCreateTask
                         <Link to={link}>Open {task.course_id && task.topic_id ? "study" : "course"}</Link>
                       </Button>
                     )}
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="gap-1.5"
-                      onClick={() => {
-                        const url = buildGoogleCalendarUrl(meta);
-                        if (url) window.open(url, "_blank", "noopener,noreferrer");
-                      }}
-                      disabled={!meta.dateKey}
-                    >
-                      <CalendarDays className="w-3.5 h-3.5" /> Google Calendar
-                    </Button>
                     <Button
                       type="button"
                       size="sm"

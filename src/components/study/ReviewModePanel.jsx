@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import MarkdownContent from "@/components/ui/markdown-content";
-import { CalendarDays, CheckCircle2, Eye, EyeOff, Layers3, SkipForward, XCircle } from "lucide-react";
+import { CheckCircle2, Eye, EyeOff, Layers3, SkipForward, XCircle } from "lucide-react";
 
 function getSourceIds(task = {}) {
   return Array.isArray(task.review_source_ids)
@@ -27,7 +27,6 @@ export default function ReviewModePanel({
   onMarkCorrect,
   onMarkIncorrect,
   onStartWorkedExample,
-  onAddToCalendar,
   onExit,
 }) {
   if (!task) {
@@ -155,10 +154,6 @@ export default function ReviewModePanel({
               <Button variant="outline" onClick={onStartWorkedExample} disabled={busy} className="justify-start gap-2">
                 <Layers3 className="h-4 w-4" />
                 Retry with worked example
-              </Button>
-              <Button variant="outline" onClick={onAddToCalendar} disabled={busy} className="justify-start gap-2">
-                <CalendarDays className="h-4 w-4" />
-                Add to calendar
               </Button>
             </div>
           </div>

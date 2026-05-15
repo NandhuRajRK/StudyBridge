@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { RotateCcw, ChevronLeft, ChevronRight, Check, X, Download } from "lucide-react";
+import { RotateCcw, ChevronLeft, ChevronRight, Check, X, Download, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import MarkdownContent from "@/components/ui/markdown-content";
 import { downloadFlashcardsAnki } from "@/lib/exporters";
 
@@ -18,10 +20,12 @@ function getSourceLabel(sourceCatalog = [], sourceId) {
   return sourceCatalog.find((source) => source.id === sourceId)?.label || sourceId;
 }
 
-export default function StudyFlashcards({ cards, sourceCatalog = [], onCardResult, onComplete }) {
+export default function StudyFlashcards({ cards, sourceCatalog = [], onCardResult, onComplete, onCardsChange, openEditorSignal = 0 }) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [results, setResults] = useState({});
+  const [editorIndex, setEditorIndex] = useState(0);
+  const [managing, setManaging] = useState(false);
   const completionSentRef = useRef(false);
   const hasCards = Array.isArray(cards) && cards.length > 0;
 
@@ -32,6 +36,12 @@ export default function StudyFlashcards({ cards, sourceCatalog = [], onCardResul
     setFlipped(false);
     setResults({});
   }, [hasCards, cards]);
+
+  useEffect(() => {
+    if (!openEditorSignal) return;
+    setEditorIndex(Math.max(0, cards.length - 1));
+    setManaging(true);
+  }, [openEditorSignal]);
 
   useEffect(() => {
     if (!hasCards || Object.keys(results).length !== cards.length || completionSentRef.current) return;
@@ -48,6 +58,7 @@ export default function StudyFlashcards({ cards, sourceCatalog = [], onCardResul
   }
 
   const card = cards[currentIndex];
+  const editorCard = cards[Math.max(0, Math.min(editorIndex, cards.length - 1))] || cards[0];
   const total = cards.length;
   const correct = Object.values(results).filter(r => r === 'correct').length;
 
@@ -77,7 +88,79 @@ export default function StudyFlashcards({ cards, sourceCatalog = [], onCardResul
   };
 
   return (
-    <div className="p-6 lg:p-8 max-w-xl mx-auto">
+    <div className="p-6 lg:p-8 max-w-5xl mx-auto">
+      <div className="mb-4 flex justify-end">
+        <Button
+          type="button"
+          variant={managing ? "default" : "outline"}
+          size="icon"
+          aria-label={managing ? "Close card editor" : "Open card editor"}
+          onClick={() => setManaging((value) => !value)}
+        >
+          <Pencil className="h-4 w-4" />
+        </Button>
+      </div>
+      {managing ? (
+      <div className="mb-6 rounded-xl border bg-muted/20 p-3 space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          {cards.map((item, index) => (
+            <Button
+              key={`${index}-${item.front || "card"}`}
+              type="button"
+              variant={index === editorIndex ? "default" : "outline"}
+              size="sm"
+              onClick={() => setEditorIndex(index)}
+            >
+              Card {index + 1}
+            </Button>
+          ))}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const next = [...(cards || []), { front: "", back: "", source_ids: [] }];
+              onCardsChange?.(next);
+              setEditorIndex(next.length - 1);
+            }}
+          >
+            Add card
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              if (cards.length <= 1) return;
+              const next = cards.filter((_, i) => i !== editorIndex);
+              onCardsChange?.(next);
+              setEditorIndex(Math.max(0, editorIndex - 1));
+            }}
+            disabled={cards.length <= 1}
+          >
+            Remove selected
+          </Button>
+        </div>
+        <Input
+          value={editorCard.front || ""}
+          placeholder="Front"
+          onChange={(event) => {
+            const next = cards.map((item, i) => (i === editorIndex ? { ...item, front: event.target.value } : item));
+            onCardsChange?.(next);
+          }}
+        />
+        <Textarea
+          value={editorCard.back || ""}
+          placeholder="Back"
+          rows={3}
+          onChange={(event) => {
+            const next = cards.map((item, i) => (i === editorIndex ? { ...item, back: event.target.value } : item));
+            onCardsChange?.(next);
+          }}
+        />
+      </div>
+      ) : (
+        <>
       {/* Progress */}
       <div className="flex items-center justify-between mb-6">
         <span className="text-sm text-muted-foreground">Card {currentIndex + 1} of {total}</span>
@@ -161,6 +244,8 @@ export default function StudyFlashcards({ cards, sourceCatalog = [], onCardResul
             </Button>
           </div>
         </>
+      )}
+      </>
       )}
     </div>
   );

@@ -69,16 +69,6 @@ export function buildTaskCalendarMeta(task, course, topic, fallbackDate = null) 
   };
 }
 
-export function buildGoogleCalendarUrl({ title, details, dateKey, nextDateKey }) {
-  if (!dateKey) return "";
-  const params = new URLSearchParams();
-  params.set("action", "TEMPLATE");
-  params.set("text", title);
-  params.set("details", details);
-  params.set("dates", `${dateKey.replace(/-/g, "")}/${(nextDateKey || dateKey).replace(/-/g, "")}`);
-  return `https://calendar.google.com/calendar/render?${params.toString()}`;
-}
-
 export function buildOutlookCalendarUrl({ title, details, dateKey }) {
   if (!dateKey) return "";
   const params = new URLSearchParams();
@@ -139,13 +129,6 @@ export function downloadTextFile(filename, text, mimeType = "text/plain;charset=
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
-}
-
-export function openGoogleCalendarTask(task, course, topic, fallbackDate = null) {
-  const meta = buildTaskCalendarMeta(task, course, topic, fallbackDate);
-  const url = buildGoogleCalendarUrl(meta);
-  if (!url) return;
-  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 export function openOutlookCalendarTask(task, course, topic, fallbackDate = null) {

@@ -8,10 +8,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { isDesktopAiUnavailable, loadDesktopAiRuntime } from "@/lib/desktopAi";
 import { loadStudyContextBundle } from "@/lib/aiContext";
-import { Download, Expand, GitBranch, HelpCircle, Loader2, Minimize2, Move, Plus, RefreshCw, Save, Sparkles, Trash2, ZoomIn, ZoomOut } from "lucide-react";
+import { Download, GitBranch, HelpCircle, Loader2, Move, Pencil, Plus, RefreshCw, Save, Sparkles, Trash2, X, ZoomIn, ZoomOut } from "lucide-react";
 import { useLocale } from "@/lib/locale";
 import { downloadMindMapMarkdown, downloadOpml } from "@/lib/exporters";
-import { Background, ReactFlow, ViewportPortal, MarkerType, applyNodeChanges } from "@xyflow/react";
+import { Background, ReactFlow, ViewportPortal, MarkerType } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
 const ROOT_NODE_COLOR = "#3B5BDB";
@@ -177,7 +177,7 @@ function iconButton(tooltip, icon, onClick, disabled = false) {
   );
 }
 
-function toFlowNode(node, selectedNodeId) {
+function toFlowNode(node, selectedNodeId, onEditNode) {
   const isRoot = node.parentId === null;
   const active = node.id === selectedNodeId;
   return {
@@ -188,19 +188,32 @@ function toFlowNode(node, selectedNodeId) {
     data: {
       label: (
         <div className="min-w-0">
-          <div className="flex items-start gap-2">
-            <span
-              className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full"
-              style={{ backgroundColor: active ? "white" : (node.color || DEFAULT_NODE_COLOR) }}
-            />
-            <div className="min-w-0">
-              <p className="truncate text-sm font-medium leading-tight">{node.title}</p>
-              {node.note ? (
-                <p className={`mt-1 line-clamp-2 text-xs leading-5 ${active ? "text-primary-foreground/80" : "text-muted-foreground"}`}>
-                  {node.note}
-                </p>
-              ) : null}
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex min-w-0 items-start gap-2">
+              <span
+                className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full"
+                style={{ backgroundColor: active ? "white" : (node.color || DEFAULT_NODE_COLOR) }}
+              />
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium leading-tight">{node.title}</p>
+                {node.note ? (
+                  <p className={`mt-1 line-clamp-2 text-xs leading-5 ${active ? "text-primary-foreground/80" : "text-muted-foreground"}`}>
+                    {node.note}
+                  </p>
+                ) : null}
+              </div>
             </div>
+            <button
+              type="button"
+              className={`nodrag nopan inline-flex h-7 w-7 shrink-0 items-center justify-center rounded transition-colors ${active ? "hover:bg-white/20" : "hover:bg-muted"}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onEditNode(node.id);
+              }}
+              aria-label={`Edit ${node.title}`}
+            >
+              <Pencil className="h-4 w-4" />
+            </button>
           </div>
         </div>
       ),
@@ -217,7 +230,7 @@ function toFlowNode(node, selectedNodeId) {
   };
 }
 
-export default function MindMap() {
+export default function MindMap({ forcedCourseId = "" }) {
   const { t } = useLocale();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -232,8 +245,8 @@ export default function MindMap() {
   const [saving, setSaving] = useState(false);
   const [building, setBuilding] = useState(false);
   const [runtime, setRuntime] = useState(null);
-  const [canvasExpanded, setCanvasExpanded] = useState(false);
   const [rfInstance, setRfInstance] = useState(null);
+  const [editingNodeId, setEditingNodeId] = useState("");
 
   useEffect(() => {
     loadDesktopAiRuntime().then(setRuntime);
@@ -243,6 +256,10 @@ export default function MindMap() {
     const loadCourses = async () => {
       const activeCourses = await studybridge.entities.Course.filter({ status: "active" }, "-created_date", 50);
       setCourses(activeCourses);
+      if (forcedCourseId && activeCourses.some((course) => course.id === forcedCourseId)) {
+        setSelectedCourseId(forcedCourseId);
+        return;
+      }
       const courseFromQuery = searchParams.get("course");
       if (courseFromQuery && activeCourses.some((course) => course.id === courseFromQuery)) {
         setSelectedCourseId(courseFromQuery);
@@ -254,7 +271,7 @@ export default function MindMap() {
     };
 
     loadCourses().catch((error) => console.error("Failed to load courses for mindmap", error));
-  }, [searchParams, selectedCourseId]);
+  }, [searchParams, selectedCourseId, forcedCourseId]);
 
   useEffect(() => {
     const loadMindMap = async () => {
@@ -276,6 +293,7 @@ export default function MindMap() {
       setRecord(existing);
       setNodes(positioned);
       setSelectedNodeId(positioned[0]?.id || "");
+      setEditingNodeId("");
       setNewChildTitle("");
       setNewChildNote("");
     };
@@ -285,11 +303,17 @@ export default function MindMap() {
 
   const selectedCourse = courses.find((course) => course.id === selectedCourseId);
   const selectedNode = nodes.find((node) => node.id === selectedNodeId) || null;
+  const editingNode = nodes.find((node) => node.id === editingNodeId) || null;
   const aiUnavailable = isDesktopAiUnavailable(runtime);
 
+  const openNodeEditor = useCallback((nodeId) => {
+    setSelectedNodeId(nodeId);
+    setEditingNodeId(nodeId);
+  }, []);
+
   const flowNodes = useMemo(
-    () => nodes.map((node) => toFlowNode(node, selectedNodeId)),
-    [nodes, selectedNodeId],
+    () => nodes.map((node) => toFlowNode(node, selectedNodeId, openNodeEditor)),
+    [nodes, selectedNodeId, openNodeEditor],
   );
 
   const flowEdges = useMemo(
@@ -307,67 +331,58 @@ export default function MindMap() {
   );
 
   const onFlowNodesChange = useCallback((changes) => {
-    setNodes((prev) => {
-      const base = prev.map((node) => ({
-        id: node.id,
-        position: { x: Number(node.x || 0), y: Number(node.y || 0) },
-        data: {},
-      }));
-      const changed = applyNodeChanges(changes, base);
-      const byId = new Map(prev.map((node) => [node.id, node]));
-      return changed
-        .map((flowNode) => {
-          const current = byId.get(flowNode.id);
-          if (!current) return null;
-          return {
-            ...current,
-            x: Number(flowNode.position?.x || 0),
-            y: Number(flowNode.position?.y || 0),
-          };
-        })
-        .filter(Boolean);
-    });
-
     const selected = changes.find((change) => change.type === "select" && change.selected);
     if (selected?.id) {
       setSelectedNodeId(selected.id);
     }
   }, []);
 
+  const onNodeDragStop = useCallback((_, node) => {
+    setNodes((prev) => prev.map((item) => (
+      item.id === node.id
+        ? { ...item, x: Number(node.position?.x || 0), y: Number(node.position?.y || 0) }
+        : item
+    )));
+  }, []);
+
   const addChildNode = () => {
-    if (!selectedNode?.id || !newChildTitle.trim()) return;
+    const parentNode = editingNode || selectedNode;
+    if (!parentNode?.id || !newChildTitle.trim()) return;
     const nextNode = {
       id: makeId(),
-      parentId: selectedNode.id,
+      parentId: parentNode.id,
       title: newChildTitle.trim(),
       note: newChildNote.trim(),
       color: DEFAULT_NODE_COLOR,
-      x: Number(selectedNode.x || 0) + 240,
-      y: Number(selectedNode.y || 0) + ((Math.random() - 0.5) * 120),
+      x: Number(parentNode.x || 0) + 240,
+      y: Number(parentNode.y || 0) + ((Math.random() - 0.5) * 120),
     };
     setNodes((prev) => [...prev, nextNode]);
     setSelectedNodeId(nextNode.id);
+    setEditingNodeId(nextNode.id);
     setNewChildTitle("");
     setNewChildNote("");
   };
 
   const updateSelectedNode = (patch) => {
-    if (!selectedNode) return;
-    setNodes((prev) => prev.map((node) => (node.id === selectedNode.id ? { ...node, ...patch } : node)));
+    if (!editingNode) return;
+    setNodes((prev) => prev.map((node) => (node.id === editingNode.id ? { ...node, ...patch } : node)));
   };
 
-  const deleteSelectedNode = () => {
-    if (!selectedNode || selectedNode.parentId === null) return;
-    const toDelete = collectDescendants(nodes, selectedNode.id);
+  const deleteEditingNode = () => {
+    if (!editingNode || editingNode.parentId === null) return;
+    const toDelete = collectDescendants(nodes, editingNode.id);
     setNodes((prev) => prev.filter((node) => !toDelete.has(node.id)));
-    const fallback = nodes.find((node) => node.id === selectedNode.parentId) || nodes[0];
+    const fallback = nodes.find((node) => node.id === editingNode.parentId) || nodes[0];
     setSelectedNodeId(fallback?.id || "");
+    setEditingNodeId("");
   };
 
   const resetFromTopics = () => {
     const seeded = ensureNodePositions(buildSeedMap(selectedCourse, topics));
     setNodes(seeded);
     setSelectedNodeId(seeded[0]?.id || "");
+    setEditingNodeId("");
     requestAnimationFrame(() => {
       rfInstance?.fitView({ padding: 0.2, duration: 350 });
     });
@@ -525,7 +540,7 @@ Return JSON with:
                   </button>
                 </TooltipTrigger>
                 <TooltipContent className="max-w-sm leading-relaxed">
-                  Drag nodes to rearrange. Click a node to edit it in-place. Double click empty canvas to create a child branch.
+                  Drag nodes to rearrange. Click a node to select it, then click the pencil icon on that node to open editing.
                 </TooltipContent>
               </Tooltip>
             </div>
@@ -548,11 +563,6 @@ Return JSON with:
                 saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />,
                 saveMindMap,
                 saving || nodes.length === 0,
-              )}
-              {iconButton(
-                canvasExpanded ? "Collapse canvas" : "Expand canvas",
-                canvasExpanded ? <Minimize2 className="h-4 w-4" /> : <Expand className="h-4 w-4" />,
-                () => setCanvasExpanded((value) => !value),
               )}
             </div>
           </div>
@@ -587,13 +597,17 @@ Return JSON with:
             </div>
           </div>
 
-          <div className={`min-h-0 flex-1 overflow-hidden rounded-xl border bg-card ${canvasExpanded ? "h-[calc(100vh-220px)]" : "h-[72vh]"}`}>
+          <div className="min-h-0 flex-1 overflow-hidden rounded-xl border bg-card h-[72vh]">
             <ReactFlow
               nodes={flowNodes}
               edges={flowEdges}
               onNodesChange={onFlowNodesChange}
               onNodeClick={(_, node) => setSelectedNodeId(node.id)}
-              onPaneClick={() => setSelectedNodeId("")}
+              onNodeDragStop={onNodeDragStop}
+              onPaneClick={() => {
+                setSelectedNodeId("");
+                setEditingNodeId("");
+              }}
               onInit={setRfInstance}
               fitView
               minZoom={0.2}
@@ -605,29 +619,34 @@ Return JSON with:
             >
               <Background gap={24} size={1.2} color="hsl(var(--border))" />
 
-              {selectedNode && (
+              {editingNode && (
                 <ViewportPortal>
                   <div
                     className="absolute z-30 w-[320px] rounded-xl border bg-card p-3 shadow-xl"
-                    style={{ transform: `translate(${Number(selectedNode.x || 0) + 170}px, ${Number(selectedNode.y || 0) - 40}px)` }}
+                    style={{ transform: `translate(${Number(editingNode.x || 0) + 170}px, ${Number(editingNode.y || 0) - 40}px)` }}
                   >
                     <div className="mb-2 flex items-center justify-between">
                       <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Selected node</p>
-                      {selectedNode.parentId !== null ? (
-                        <Button type="button" variant="destructive" size="icon" onClick={deleteSelectedNode} aria-label="Delete branch">
-                          <Trash2 className="h-4 w-4" />
+                      <div className="flex items-center gap-1">
+                        {editingNode.parentId !== null ? (
+                          <Button type="button" variant="destructive" size="icon" onClick={deleteEditingNode} aria-label="Delete branch">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        ) : null}
+                        <Button type="button" variant="outline" size="icon" onClick={() => setEditingNodeId("")} aria-label="Close editor">
+                          <X className="h-4 w-4" />
                         </Button>
-                      ) : null}
+                      </div>
                     </div>
 
                     <div className="space-y-2">
                       <Input
-                        value={selectedNode.title}
+                        value={editingNode.title}
                         onChange={(event) => updateSelectedNode({ title: event.target.value })}
                         placeholder="Node title"
                       />
                       <Textarea
-                        value={selectedNode.note || ""}
+                        value={editingNode.note || ""}
                         onChange={(event) => updateSelectedNode({ note: event.target.value })}
                         placeholder="Node note"
                         rows={3}

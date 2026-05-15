@@ -7,6 +7,13 @@ const PRIORITY_ORDER = {
   low: 2,
 };
 
+function normalizeArray(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => String(item ?? "").trim())
+    .filter(Boolean);
+}
+
 function slugify(value) {
   return String(value || "")
     .trim()
