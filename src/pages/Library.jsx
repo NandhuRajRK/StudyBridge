@@ -251,7 +251,6 @@ export default function Library() {
       <div className="flex h-full min-h-0 w-full flex-col gap-6 p-6 lg:p-8">
         <div>
           <h1 className="text-2xl font-semibold">Library</h1>
-          <p className="text-sm text-muted-foreground mt-1">Artifacts and AI chats in one filtered table view</p>
         </div>
 
         <div className="flex flex-col gap-3 md:flex-row md:flex-wrap">

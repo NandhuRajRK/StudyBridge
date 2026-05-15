@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { ArrowRight, BookOpenText, GraduationCap, Link2, PanelLeft, Settings2, Sparkles } from "lucide-react";
+import { ArrowRight, BookOpenText, Link2, PanelLeft, Settings2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -20,11 +20,11 @@ const sections = [
   },
   {
     title: "4. AI modes",
-    body: "Desktop users can use Codex CLI for OpenAI-backed generation without storing an OpenAI key in StudyBridge. Local Gemma through llama.cpp and Google, OpenAI, or Anthropic API keys remain optional fallback modes.",
+    body: "Desktop users can use Codex CLI for OpenAI-backed generation without storing an OpenAI key in StudyBridge. Local Gemma (llama.cpp or Ollama) and cloud API keys (Google, OpenAI, Anthropic) are supported fallback modes.",
   },
   {
     title: "5. Exports",
-    body: "StudyBridge can export notes, flashcards, study guides, calendar tasks, and mind maps so you can move data between tools instead of locking it in one place.",
+    body: "StudyBridge can export notes, flashcards, study guides, and mind maps so you can move data between tools instead of locking it in one place.",
   },
   {
     title: "6. Storage and privacy",
@@ -44,9 +44,6 @@ export default function Docs() {
           </div>
           <div className="space-y-2">
             <h1 className="text-3xl font-semibold tracking-tight">How to use StudyBridge</h1>
-            <p className="text-sm text-muted-foreground max-w-2xl">
-              This guide is written for students first, with enough detail for teachers, mentors, and demo reviewers to understand the workflow quickly.
-            </p>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -136,21 +133,6 @@ export default function Docs() {
             </Card>
           ))}
         </div>
-      </div>
-
-      <Separator />
-
-      <div className="rounded-xl border bg-muted/20 p-5 space-y-3">
-        <div className="flex items-center gap-2">
-          <GraduationCap className="w-4 h-4 text-primary" />
-          <h2 className="font-semibold text-base">Notes for reviewers</h2>
-        </div>
-        <p className="text-sm text-muted-foreground leading-6">
-          StudyBridge is built as a local-first student platform. The desktop version uses SQLite, local files, and optional AI providers.
-        </p>
-        <p className="text-sm text-muted-foreground leading-6">
-          If you are evaluating it for a hackathon or portfolio review, the most important flow to test is: create a course, upload material, generate study outputs, approve any writes, and inspect progress over time.
-        </p>
       </div>
       </div>
       </div>

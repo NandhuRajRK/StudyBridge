@@ -156,16 +156,13 @@ export default function Courses() {
     );
   }
 
-  const activeCourseCount = courses.filter((course) => course.status === "active").length;
-
   return (
     <div className="h-full overflow-hidden bg-background">
       <div className="flex h-full min-h-0 w-full flex-col gap-6 p-6 lg:p-8">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold">Courses</h1>
-            <p className="text-sm text-muted-foreground mt-1">{activeCourseCount} active courses</p>
-          </div>
+        <div>
+          <h1 className="text-2xl font-semibold">Courses</h1>
+        </div>
           <Button onClick={() => setShowCreate(true)} className="gap-2">
             <Plus className="w-4 h-4" /> Add Course
           </Button>

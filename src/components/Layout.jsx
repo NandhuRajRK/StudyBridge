@@ -35,6 +35,7 @@ export default function Layout() {
     if (path === "/") return location.pathname === "/";
     return location.pathname.startsWith(path);
   };
+  const hideGlobalTutorDrawer = location.pathname.startsWith("/study");
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -92,7 +93,7 @@ export default function Layout() {
           <Outlet />
         </div>
       </main>
-      <GlobalTutorDrawer />
+      {!hideGlobalTutorDrawer ? <GlobalTutorDrawer /> : null}
     </div>
   );
 }

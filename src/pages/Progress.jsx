@@ -68,9 +68,6 @@ export default function Progress() {
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <h1 className="text-2xl font-semibold">{t("nav.progress")}</h1>
-              <p className="text-sm text-muted-foreground mt-1">
-                {profile?.full_name || "Student"} - {profile?.major || "no major set"} - {dailyGoal} min/day goal
-              </p>
             </div>
             <div className="flex items-center gap-2">
               <Button asChild variant="outline" className="gap-2">

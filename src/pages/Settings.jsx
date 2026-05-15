@@ -515,7 +515,6 @@ export default function Settings() {
       <div className="flex h-full min-h-0 w-full flex-col gap-6 p-6 lg:p-8">
         <div>
           <h1 className="text-2xl font-semibold">{t("settings.title")}</h1>
-          <p className="text-sm text-muted-foreground mt-1">{t("settings.subtitle")}</p>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto pr-1">

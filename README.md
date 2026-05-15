@@ -1,32 +1,39 @@
 # StudyBridge
 
-StudyBridge is a local-first AI study companion for students. It keeps courses, uploads, notes, tasks, progress, and AI tutoring in one grounded system instead of scattering them across separate tools.
+StudyBridge is an open-source, local-first AI study companion for students. It keeps courses, uploads, notes, tasks, progress, and AI tutoring in one grounded system instead of scattering them across separate tools.
 
 The app is built for:
 
 - Students who need offline or unstable-internet support
 - Students who want one place for materials, notes, progress, and study planning
-- Teachers, mentors, and reviewers who want a clear student workflow to evaluate
-- Hackathon and portfolio demos that need a real product story, not just a chatbot
+- Teachers and mentors who want a clear student workflow to evaluate
 
 ## What It Does
 
 - AI Tutor with course-aware grounded replies
-- Study sessions with summaries, flashcards, quizzes, notes, and chat
-- Planner with actionable tasks and calendar export
+- Study sessions with summaries, flashcards, quizzes, notes, mind maps, and chat
+- Planner with actionable tasks and due-date scheduling
 - Library for materials, notes, saved answers, guides, and chats
 - Mind map creation, editing, and export
-- Desktop local AI with `llama.cpp`
-- Optional BYOK cloud AI with Google, OpenAI, or Anthropic API keys
-- Optional CLI orchestrators for advanced agent workflows
+- Review queue with spaced follow-up scheduling
+- Desktop local AI via `llama.cpp` or Ollama
+- Optional cloud AI with Google, OpenAI, or Anthropic API keys
+- Codex CLI mode for desktop OpenAI-backed generation
 
 ## How It Works
 
 StudyBridge keeps the app in control of the important parts:
 
+- Course/topic-grounded context assembly
+- Source-linked artifact generation
+- Explicit write approvals before persistence
+- Session, review, and confidence tracking in app state
 
 This lets the app stay:
 
+- Local-first for data ownership
+- Verifiable through source links
+- Structured for repeatable study workflows
 
 The full student guide lives inside the app at `Docs`.
 
@@ -35,9 +42,9 @@ For provider-specific setup and official references, use the `Official docs` dro
 ## Desktop
 
 - Windows-only desktop build
-- Local AI runs through `llama.cpp`
-- The app auto-selects a Gemma variant based on available memory
-- Optional Codex CLI and cloud API key providers
+- Local AI runs through `llama.cpp` or Ollama
+- The app supports local model startup/readiness checks
+- Codex CLI and cloud API-key modes are available in Settings
 
 ## Official Runtime Docs
 
@@ -70,9 +77,9 @@ If Windows packaging fails with symlink privilege errors, run the terminal as Ad
 
 StudyBridge supports three main AI paths:
 
-- Local Gemma through `llama.cpp`
-- Google, OpenAI, or Anthropic API key BYOK mode
-- Optional CLI orchestrators for background agent workflows
+- Codex CLI mode
+- Local Gemma through `llama.cpp` or Ollama
+- Google, OpenAI, or Anthropic API-key mode
 
 When AI is not configured, the app does not guess. It points the user back to Settings.
 
@@ -94,17 +101,6 @@ npm run build
 npm run lint
 npm run test
 ```
-
-## Hackathon Positioning
-
-StudyBridge is a strong hackathon submission because it shows:
-
-- A real student workflow
-- Offline-first and low-connectivity support
-- Grounded retrieval instead of generic chat
-- Local-first data handling
-- Optional cloud AI without forcing it on the user
-- A clear architecture that can be explained in a review or demo
 
 ## License And Liability
 
