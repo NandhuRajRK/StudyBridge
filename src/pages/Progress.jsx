@@ -11,6 +11,9 @@ import { formatDistanceToNow } from "date-fns";
 import { getAverageMastery, getCourseProgressData, getMasteryDistribution, getStrongTopics, getWeeklyStudyStats, getWeakTopics, sumSessionMinutes } from "@/lib/studyStats";
 import { useLocale } from "@/lib/locale";
 import { Tooltip as HoverTooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { DataTablePagination, DataTableToolbar } from "@/components/ui/data-table-controls";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useTableState } from "@/hooks/useTableState";
 
 const COLORS = ["#3B5BDB", "#1098AD", "#37B24D", "#F59F00", "#E64980", "#7950F2"];
 
@@ -20,6 +23,10 @@ export default function Progress() {
   const [topics, setTopics] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const sessionTable = useTableState({
+    initialFilters: { course: "all", topic: "all" },
+    initialPageSize: 10,
+  });
   const { t } = useLocale();
 
   useEffect(() => {
@@ -60,6 +67,18 @@ export default function Progress() {
   } = getWeeklyStudyStats(sessions, dailyGoal);
   const courseProgressData = getCourseProgressData(courses);
   const masteryDist = getMasteryDistribution(topics);
+  const filteredSessions = sessions.filter((session) => {
+    if (sessionTable.filters.course !== "all" && session.course_id !== sessionTable.filters.course) return false;
+    if (sessionTable.filters.topic !== "all" && session.topic_id !== sessionTable.filters.topic) return false;
+    const q = sessionTable.search.trim().toLowerCase();
+    if (!q) return true;
+    return [
+      session.topic_title || "",
+      session.course_title || "",
+      session.status || "",
+    ].join(" ").toLowerCase().includes(q);
+  });
+  const sessionPagination = sessionTable.paginate(filteredSessions);
 
   return (
     <TooltipProvider delayDuration={120}>
@@ -258,46 +277,81 @@ export default function Progress() {
 
         <TabsContent value="sessions" className="mt-4">
           <div className="bg-card border rounded-lg overflow-hidden">
-            {sessions.length === 0 ? (
+            <div className="p-4 border-b">
+              <DataTableToolbar
+                searchValue={sessionTable.search}
+                onSearchChange={sessionTable.setSearch}
+                searchPlaceholder="Search sessions..."
+              >
+                <Select value={sessionTable.filters.course} onValueChange={(value) => sessionTable.setFilter("course", value)}>
+                  <SelectTrigger className="w-full md:w-56"><SelectValue placeholder="Course" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All courses</SelectItem>
+                    {courses.map((course) => (
+                      <SelectItem key={course.id} value={course.id}>{course.title}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={sessionTable.filters.topic} onValueChange={(value) => sessionTable.setFilter("topic", value)}>
+                  <SelectTrigger className="w-full md:w-56"><SelectValue placeholder="Topic" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All topics</SelectItem>
+                    {topics.map((topic) => (
+                      <SelectItem key={topic.id} value={topic.id}>{topic.title}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </DataTableToolbar>
+            </div>
+            {filteredSessions.length === 0 ? (
               <p className="p-6 text-center text-sm text-muted-foreground">No study sessions yet</p>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Topic</TableHead>
-                    <TableHead>Course</TableHead>
-                    <TableHead>Duration</TableHead>
-                    <TableHead>Confidence before/after</TableHead>
-                    <TableHead>Date</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {sessions.map((session) => (
-                    <TableRow key={session.id}>
-                      <TableCell className="font-medium">{session.topic_title || "Untitled topic"}</TableCell>
-                      <TableCell>{session.course_title || "No course"}</TableCell>
-                      <TableCell>{session.duration_minutes || 0}m</TableCell>
-                      <TableCell>
-                        {session.confidence_before != null || session.confidence_after != null
-                          ? `${session.confidence_before ?? "—"} → ${session.confidence_after ?? "—"}`
-                          : "—"}
-                      </TableCell>
-                      <TableCell>
-                        {session.created_date ? (
-                          <div className="text-sm">
-                            <p>{new Date(session.created_date).toLocaleDateString()}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {formatDistanceToNow(new Date(session.created_date), { addSuffix: true })}
-                            </p>
-                          </div>
-                        ) : (
-                          "—"
-                        )}
-                      </TableCell>
+              <>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Topic</TableHead>
+                      <TableHead>Course</TableHead>
+                      <TableHead>Duration</TableHead>
+                      <TableHead>Confidence before/after</TableHead>
+                      <TableHead>Date</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {sessionPagination.rows.map((session) => (
+                      <TableRow key={session.id}>
+                        <TableCell className="font-medium">{session.topic_title || "Untitled topic"}</TableCell>
+                        <TableCell>{session.course_title || "No course"}</TableCell>
+                        <TableCell>{session.duration_minutes || 0}m</TableCell>
+                        <TableCell>
+                          {session.confidence_before != null || session.confidence_after != null
+                            ? `${session.confidence_before ?? "—"} → ${session.confidence_after ?? "—"}`
+                            : "—"}
+                        </TableCell>
+                        <TableCell>
+                          {session.created_date ? (
+                            <div className="text-sm">
+                              <p>{new Date(session.created_date).toLocaleDateString()}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {formatDistanceToNow(new Date(session.created_date), { addSuffix: true })}
+                              </p>
+                            </div>
+                          ) : (
+                            "—"
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                <DataTablePagination
+                  page={sessionPagination.safePage}
+                  pageSize={sessionTable.pageSize}
+                  total={filteredSessions.length}
+                  onPageChange={sessionTable.setPage}
+                  onPageSizeChange={sessionTable.setPageSize}
+                />
+              </>
             )}
           </div>
         </TabsContent>

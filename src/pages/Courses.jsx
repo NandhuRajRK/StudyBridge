@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
-import { ArrowDown, ArrowUp, ArrowUpDown, BookOpen, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, BookOpen, Plus } from "lucide-react";
 import { studybridge } from "@/api/studybridgeClient";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import CreateCourseDialog from "@/components/courses/CreateCourseDialog";
-import { confirmAndDelete } from "@/lib/deleteEntity";
+import { DataTablePagination, DataTableToolbar } from "@/components/ui/data-table-controls";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import DeleteActionButton from "@/components/common/DeleteActionButton";
+import { useTableState } from "@/hooks/useTableState";
 
 const SORTABLE_COLUMNS = {
   code: true,
@@ -33,6 +36,10 @@ export default function Courses() {
   const [showCreate, setShowCreate] = useState(false);
   const [sortBy, setSortBy] = useState("course");
   const [sortDirection, setSortDirection] = useState("asc");
+  const table = useTableState({
+    initialFilters: { status: "all" },
+    initialPageSize: 10,
+  });
 
   useEffect(() => {
     loadData();
@@ -55,16 +62,6 @@ export default function Courses() {
   const handleCourseCreated = (newCourse) => {
     setCourses((prev) => [newCourse, ...prev]);
     setShowCreate(false);
-  };
-
-  const handleDeleteCourse = async (course) => {
-    try {
-      const deleted = await confirmAndDelete("Course", course, `${course.title} and all related content`);
-      if (deleted) await loadData();
-    } catch (error) {
-      console.error("Failed to delete course", error);
-      window.alert(error.message || "Failed to delete course");
-    }
   };
 
   const rows = useMemo(() => {
@@ -136,6 +133,21 @@ export default function Courses() {
     return mapped;
   }, [courses, sessions, sortBy, sortDirection, tasks, topics]);
 
+  const filteredRows = useMemo(() => {
+    const q = table.search.trim().toLowerCase();
+    return rows.filter(({ course, nextTask }) => {
+      if (table.filters.status !== "all" && String(course.status || "active") !== table.filters.status) return false;
+      if (!q) return true;
+      return [
+        course.title || "",
+        course.code || "",
+        course.term || "",
+        nextTask?.title || "",
+      ].join(" ").toLowerCase().includes(q);
+    });
+  }, [rows, table.search, table.filters.status]);
+  const pagination = table.paginate(filteredRows);
+
   const handleSort = (column) => {
     if (!SORTABLE_COLUMNS[column]) return;
     setSortBy((current) => {
@@ -181,7 +193,24 @@ export default function Courses() {
               </Button>
             </div>
           ) : (
-            <div className="bg-card border rounded-lg h-full overflow-auto">
+            <div className="bg-card border rounded-lg h-full overflow-hidden flex flex-col">
+              <div className="p-4 border-b">
+                <DataTableToolbar
+                  searchValue={table.search}
+                  onSearchChange={table.setSearch}
+                  searchPlaceholder="Search by code, course, term, or task..."
+                >
+                  <Select value={table.filters.status} onValueChange={(value) => table.setFilter("status", value)}>
+                    <SelectTrigger className="w-full md:w-44"><SelectValue placeholder="Status" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All statuses</SelectItem>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="completed">Completed</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </DataTableToolbar>
+              </div>
+              <div className="min-h-0 flex-1 overflow-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -219,7 +248,7 @@ export default function Courses() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {rows.map(({ course, progress, topicCount, lastSession, nextTask }) => (
+                  {pagination.rows.map(({ course, progress, topicCount, lastSession, nextTask }) => (
                     <TableRow
                       key={course.id}
                       className="cursor-pointer"
@@ -265,20 +294,27 @@ export default function Courses() {
                           <Button size="sm" variant="outline" onClick={() => navigate(`/courses/${course.id}`)}>
                             Open
                           </Button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteCourse(course)}
-                            className="text-muted-foreground hover:text-destructive transition-colors"
-                            aria-label="Delete course"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          <DeleteActionButton
+                            entityName="Course"
+                            item={course}
+                            label={`${course.title} and all related content`}
+                            onDeleted={loadData}
+                            ariaLabel="Delete course"
+                          />
                         </div>
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
+              </div>
+              <DataTablePagination
+                page={pagination.safePage}
+                pageSize={table.pageSize}
+                total={filteredRows.length}
+                onPageChange={table.setPage}
+                onPageSizeChange={table.setPageSize}
+              />
             </div>
           )}
         </div>

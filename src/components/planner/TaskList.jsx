@@ -1,11 +1,18 @@
 import { Link } from "react-router-dom";
 import { CheckCircle2, Circle, Trash2, Clock, ArrowRight } from "lucide-react";
+import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatDateKey, getTaskDateKey } from "@/lib/calendar";
+import { DataTablePagination, DataTableToolbar } from "@/components/ui/data-table-controls";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useTableState } from "@/hooks/useTableState";
 
 export default function TaskList({ title, tasks, courses, topics = [], onToggle, onDelete, variant }) {
-  if (tasks.length === 0) return null;
+  const table = useTableState({
+    initialFilters: { course: "all", priority: "all" },
+    initialPageSize: 10,
+  });
 
   const getPriorityColor = (p) => {
     if (p === "urgent") return "text-destructive";
@@ -24,13 +31,57 @@ export default function TaskList({ title, tasks, courses, topics = [], onToggle,
     if (task.course_id) return "Open course";
     return "No link";
   };
+  const filteredTasks = useMemo(() => {
+    const q = table.search.trim().toLowerCase();
+    return tasks.filter((task) => {
+      if (table.filters.course !== "all" && task.course_id !== table.filters.course) return false;
+      if (table.filters.priority !== "all" && (task.priority || "medium") !== table.filters.priority) return false;
+      if (!q) return true;
+      return [
+        task.title || "",
+        task.instructions || "",
+        task.topic_title || "",
+        task.course_title || "",
+      ].join(" ").toLowerCase().includes(q);
+    });
+  }, [tasks, table.search, table.filters.course, table.filters.priority]);
+  const pagination = table.paginate(filteredTasks);
+  if (tasks.length === 0) return null;
 
   return (
     <section>
       <h3 className={`text-sm font-semibold uppercase tracking-wider mb-2 ${variant === "destructive" ? "text-destructive" : "text-muted-foreground"}`}>
-        {title} ({tasks.length})
+        {title} ({filteredTasks.length})
       </h3>
-      <div className="bg-card border rounded-lg max-h-[42vh] overflow-auto">
+      <div className="bg-card border rounded-lg max-h-[52vh] overflow-hidden flex flex-col">
+        <div className="p-3 border-b">
+          <DataTableToolbar
+            searchValue={table.search}
+            onSearchChange={table.setSearch}
+            searchPlaceholder="Search tasks..."
+          >
+            <Select value={table.filters.course} onValueChange={(value) => table.setFilter("course", value)}>
+              <SelectTrigger className="w-full md:w-48"><SelectValue placeholder="Course" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All courses</SelectItem>
+                {courses.map((course) => (
+                  <SelectItem key={`${title}-course-${course.id}`} value={course.id}>{course.title}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={table.filters.priority} onValueChange={(value) => table.setFilter("priority", value)}>
+              <SelectTrigger className="w-full md:w-40"><SelectValue placeholder="Priority" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All priorities</SelectItem>
+                <SelectItem value="low">Low</SelectItem>
+                <SelectItem value="medium">Medium</SelectItem>
+                <SelectItem value="high">High</SelectItem>
+                <SelectItem value="urgent">Urgent</SelectItem>
+              </SelectContent>
+            </Select>
+          </DataTableToolbar>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto">
         <Table>
           <TableHeader>
             <TableRow>
@@ -45,7 +96,7 @@ export default function TaskList({ title, tasks, courses, topics = [], onToggle,
             </TableRow>
           </TableHeader>
           <TableBody>
-            {tasks.map(task => {
+            {pagination.rows.map(task => {
           const course = courses.find(c => c.id === task.course_id);
           const topic = topics.find(t => t.id === task.topic_id);
           const link = getTaskLink(task);
@@ -117,6 +168,14 @@ export default function TaskList({ title, tasks, courses, topics = [], onToggle,
             })}
           </TableBody>
         </Table>
+        </div>
+        <DataTablePagination
+          page={pagination.safePage}
+          pageSize={table.pageSize}
+          total={filteredTasks.length}
+          onPageChange={table.setPage}
+          onPageSizeChange={table.setPageSize}
+        />
       </div>
     </section>
   );

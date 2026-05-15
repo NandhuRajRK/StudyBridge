@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { studybridge } from "@/api/studybridgeClient";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Plus, Upload, Brain, FileText, Trash2, GitBranch } from "lucide-react";
@@ -14,6 +14,7 @@ import CourseOverview from "@/components/courses/CourseOverview";
 import AddTopicDialog from "@/components/courses/AddTopicDialog";
 import { confirmAndDelete } from "@/lib/deleteEntity";
 import { goBackOr } from "@/lib/navigation";
+import { useEntityLoader } from "@/hooks/useEntityLoader";
 
 export default function CourseDetail() {
   const { courseId: id } = useParams();
@@ -24,16 +25,10 @@ export default function CourseDetail() {
   const [notes, setNotes] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [decks, setDecks] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [showAddTopic, setShowAddTopic] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const handleBack = () => goBackOr(navigate, "/courses");
-
-  useEffect(() => {
-    loadData();
-  }, [id]);
-
-  const loadData = async () => {
+  const { loading, reload } = useEntityLoader(async () => {
     const [c, tp, m, n, s, d] = await Promise.all([
       studybridge.entities.Course.filter({ id }, null, 1).then(r => r[0]),
       studybridge.entities.Topic.filter({ course_id: id }, "order", 100),
@@ -48,13 +43,13 @@ export default function CourseDetail() {
     setNotes(n);
     setSessions(s);
     setDecks(d);
-    setLoading(false);
-  };
+    return null;
+  }, [id]);
 
   const handleDelete = async (entityName, item, label) => {
     try {
       const deleted = await confirmAndDelete(entityName, item, label);
-      if (deleted) await loadData();
+      if (deleted) await reload();
     } catch (error) {
       console.error("Failed to delete course item", error);
       window.alert(error.message || "Failed to delete item");
@@ -172,7 +167,7 @@ export default function CourseDetail() {
           </TabsContent>
 
           <TabsContent value="flashcards">
-            <DecksList decks={decks} courseId={course.id} onReload={loadData} onDelete={(deck) => handleDelete("FlashcardDeck", deck, deck.title || "flashcard deck")} />
+            <DecksList decks={decks} courseId={course.id} onReload={reload} onDelete={(deck) => handleDelete("FlashcardDeck", deck, deck.title || "flashcard deck")} />
           </TabsContent>
         </Tabs>
       </div>
@@ -181,14 +176,14 @@ export default function CourseDetail() {
         open={showAddTopic}
         onClose={() => setShowAddTopic(false)}
         courseId={course.id}
-        onCreated={loadData}
+        onCreated={reload}
       />
       <MaterialUploader
         open={showUpload}
         onClose={() => setShowUpload(false)}
         courseId={course.id}
         topics={topics}
-        onUploaded={loadData}
+        onUploaded={reload}
       />
       </div>
     </div>

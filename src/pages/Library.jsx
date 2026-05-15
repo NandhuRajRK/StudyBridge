@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Download, ExternalLink, Search, Trash2 } from "lucide-react";
+import { Download, ExternalLink } from "lucide-react";
 import { studybridge } from "@/api/studybridgeClient";
-import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { isConversationRecord, isSavedAnswerRecord } from "@/lib/aiConversations";
-import { confirmAndDelete } from "@/lib/deleteEntity";
 import { downloadNotesMarkdown } from "@/lib/exporters";
+import { DataTablePagination, DataTableToolbar } from "@/components/ui/data-table-controls";
+import DeleteActionButton from "@/components/common/DeleteActionButton";
 
 const TYPE_LABEL = {
   material: "Material",
@@ -34,6 +34,8 @@ export default function Library() {
   const [filterCourse, setFilterCourse] = useState("all");
   const [filterTopic, setFilterTopic] = useState("all");
   const [filterType, setFilterType] = useState("all");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [loading, setLoading] = useState(true);
 
   const loadData = async () => {
@@ -64,16 +66,6 @@ export default function Library() {
   useEffect(() => {
     loadData().catch((error) => console.error("Failed to load library", error));
   }, []);
-
-  const handleDelete = async (entityName, item, label) => {
-    try {
-      const deleted = await confirmAndDelete(entityName, item, label);
-      if (deleted) await loadData();
-    } catch (error) {
-      console.error("Failed to delete library item", error);
-      window.alert(error.message || "Failed to delete item");
-    }
-  };
 
   const rows = useMemo(() => {
     const courseById = new Map(courses.map((course) => [course.id, course]));
@@ -239,6 +231,9 @@ export default function Library() {
       );
     });
   }, [filterCourse, filterTopic, filterType, rows, search]);
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const pagedRows = filteredRows.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   if (loading) return (
     <div className="flex items-center justify-center h-full">
@@ -253,12 +248,15 @@ export default function Library() {
           <h1 className="text-2xl font-semibold">Library</h1>
         </div>
 
-        <div className="flex flex-col gap-3 md:flex-row md:flex-wrap">
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search artifacts or chats..." className="pl-9" />
-          </div>
-          <Select value={filterCourse} onValueChange={setFilterCourse}>
+        <DataTableToolbar
+          searchValue={search}
+          onSearchChange={(value) => {
+            setSearch(value);
+            setPage(1);
+          }}
+          searchPlaceholder="Search artifacts or chats..."
+        >
+          <Select value={filterCourse} onValueChange={(value) => { setFilterCourse(value); setPage(1); }}>
             <SelectTrigger className="w-full md:w-52"><SelectValue placeholder="Course" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All courses</SelectItem>
@@ -267,7 +265,7 @@ export default function Library() {
               ))}
             </SelectContent>
           </Select>
-          <Select value={filterTopic} onValueChange={setFilterTopic}>
+          <Select value={filterTopic} onValueChange={(value) => { setFilterTopic(value); setPage(1); }}>
             <SelectTrigger className="w-full md:w-56"><SelectValue placeholder="Topic" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All topics</SelectItem>
@@ -276,7 +274,7 @@ export default function Library() {
               ))}
             </SelectContent>
           </Select>
-          <Select value={filterType} onValueChange={setFilterType}>
+          <Select value={filterType} onValueChange={(value) => { setFilterType(value); setPage(1); }}>
             <SelectTrigger className="w-full md:w-48"><SelectValue placeholder="Type" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All types</SelectItem>
@@ -285,12 +283,14 @@ export default function Library() {
               ))}
             </SelectContent>
           </Select>
-        </div>
+        </DataTableToolbar>
 
-        <div className="bg-card border rounded-lg min-h-0 flex-1 overflow-auto">
+        <div className="bg-card border rounded-lg min-h-0 flex-1 overflow-hidden flex flex-col">
           {filteredRows.length === 0 ? (
             <p className="p-8 text-center text-sm text-muted-foreground">No items match your current filters.</p>
           ) : (
+            <>
+            <div className="min-h-0 flex-1 overflow-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -303,7 +303,7 @@ export default function Library() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredRows.map((row) => (
+                {pagedRows.map((row) => (
                   <TableRow key={row.id}>
                     <TableCell>
                       <div className="min-w-0">
@@ -358,20 +358,31 @@ export default function Library() {
                             <Download className="w-3.5 h-3.5" />
                           </button>
                         )}
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(row.entity, row.entityRecord, row.deleteLabel)}
-                          className="text-muted-foreground hover:text-destructive transition-colors"
-                          aria-label="Delete row"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        <DeleteActionButton
+                          entityName={row.entity}
+                          item={row.entityRecord}
+                          label={row.deleteLabel}
+                          onDeleted={loadData}
+                          ariaLabel="Delete row"
+                        />
                       </div>
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
+            </div>
+            <DataTablePagination
+              page={safePage}
+              pageSize={pageSize}
+              total={filteredRows.length}
+              onPageChange={setPage}
+              onPageSizeChange={(size) => {
+                setPageSize(size);
+                setPage(1);
+              }}
+            />
+            </>
           )}
         </div>
       </div>

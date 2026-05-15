@@ -12,6 +12,7 @@ import { loadPlannerContext } from "@/lib/aiContext";
 import { isDesktopAiUnavailable, loadDesktopAiRuntime } from "@/lib/desktopAi";
 import { useLocale } from "@/lib/locale";
 import { dateKeyToDate, getTaskDateKey } from "@/lib/calendar";
+import { useEntityLoader } from "@/hooks/useEntityLoader";
 
 const normalize = (value) => (value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
@@ -29,35 +30,28 @@ function findTopicByTitle(topics, courseId, title) {
 }
 
 export default function Planner() {
-  const [tasks, setTasks] = useState([]);
-  const [courses, setCourses] = useState([]);
-  const [topics, setTopics] = useState([]);
-  const [profile, setProfile] = useState(null);
   const [runtime, setRuntime] = useState(null);
-  const [loading, setLoading] = useState(true);
   const [showAddTask, setShowAddTask] = useState(false);
   const [addTaskInitialValues, setAddTaskInitialValues] = useState({});
   const [generatingPlan, setGeneratingPlan] = useState(false);
   const { t } = useLocale();
-
-  useEffect(() => { loadData(); }, []);
-  useEffect(() => {
-    loadDesktopAiRuntime().then(setRuntime);
-  }, []);
-
-  const loadData = async () => {
-    const [t, c, tp, p] = await Promise.all([
+  const { data, loading, reload, setData } = useEntityLoader(async () => {
+    const [tasks, courses, topics, profile] = await Promise.all([
       studybridge.entities.Task.list("due_date", 200),
       studybridge.entities.Course.filter({ status: "active" }, "-created_date", 50),
       studybridge.entities.Topic.list("order", 300),
       studybridge.auth.me(),
     ]);
-    setTasks(t);
-    setCourses(c);
-    setTopics(tp);
-    setProfile(p);
-    setLoading(false);
-  };
+    return { tasks, courses, topics, profile };
+  }, []);
+  const tasks = data?.tasks || [];
+  const courses = data?.courses || [];
+  const topics = data?.topics || [];
+  const profile = data?.profile || null;
+
+  useEffect(() => {
+    loadDesktopAiRuntime().then(setRuntime);
+  }, []);
 
   const generateStudyPlan = async () => {
     if (courses.length === 0) {
@@ -129,7 +123,7 @@ ${context}`,
         });
       }
 
-      await loadData();
+      await reload();
     } catch (error) {
       console.error("Failed to generate study plan", error);
       window.alert(error.message || "Failed to generate study plan");
@@ -144,14 +138,22 @@ ${context}`,
       status: newStatus,
       completed_at: newStatus === "completed" ? new Date().toISOString() : null
     });
-    setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
+    setData((prev) => ({
+      ...(prev || {}),
+      tasks: (prev?.tasks || []).map((t) => (t.id === task.id ? { ...t, status: newStatus } : t)),
+    }));
   };
 
   const handleDeleteTask = async (taskId) => {
     const task = tasks.find(t => t.id === taskId);
     if (!task) return;
     const deleted = await confirmAndDelete("Task", task, task.title || "task");
-    if (deleted) setTasks(prev => prev.filter(t => t.id !== taskId));
+    if (deleted) {
+      setData((prev) => ({
+        ...(prev || {}),
+        tasks: (prev?.tasks || []).filter((t) => t.id !== taskId),
+      }));
+    }
   };
 
   const openAddTaskDialog = (initialValues = {}) => {
@@ -243,7 +245,7 @@ ${context}`,
           }}
           courses={courses}
           topics={topics}
-          onCreated={loadData}
+          onCreated={reload}
           initialValues={addTaskInitialValues}
         />
       </div>
