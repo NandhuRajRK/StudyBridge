@@ -2,12 +2,43 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Download, ExternalLink } from "lucide-react";
 import { studybridge } from "@/api/studybridgeClient";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { isConversationRecord, isSavedAnswerRecord } from "@/lib/aiConversations";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  isConversationRecord,
+  isSavedAnswerRecord,
+} from "@/lib/aiConversations";
 import { downloadNotesMarkdown } from "@/lib/exporters";
-import { DataTablePagination, DataTableToolbar } from "@/components/ui/data-table-controls";
+import {
+  DataTablePagination,
+  DataTableToolbar,
+} from "@/components/ui/data-table-controls";
 import DeleteActionButton from "@/components/common/DeleteActionButton";
+
+const ALLOWED_EXTERNAL_PROTOCOLS = new Set(["http:", "https:", "file:"]);
+
+function normalizeExternalUrl(value = "") {
+  if (!value) return "";
+  try {
+    const parsed = new URL(value);
+    return ALLOWED_EXTERNAL_PROTOCOLS.has(parsed.protocol) ? parsed.href : "";
+  } catch {
+    return "";
+  }
+}
 
 const TYPE_LABEL = {
   material: "Material",
@@ -39,7 +70,17 @@ export default function Library() {
   const [loading, setLoading] = useState(true);
 
   const loadData = async () => {
-    const [courseRows, topicRows, materialRows, guideRows, deckRows, quizRows, quizQuestionRows, noteRows, savedRows] = await Promise.all([
+    const [
+      courseRows,
+      topicRows,
+      materialRows,
+      guideRows,
+      deckRows,
+      quizRows,
+      quizQuestionRows,
+      noteRows,
+      savedRows,
+    ] = await Promise.all([
       studybridge.entities.Course.list("-created_date", 50),
       studybridge.entities.Topic.list("-created_date", 300),
       studybridge.entities.StudyMaterial.list("-created_date", 200),
@@ -83,14 +124,16 @@ export default function Library() {
         courseId: item.course_id || "",
         topicId: item.topic_id || "",
         courseTitle: courseById.get(item.course_id)?.title || "No course",
-        topicTitle: topicById.get(item.topic_id)?.title || item.topic_title || "—",
+        topicTitle:
+          topicById.get(item.topic_id)?.title || item.topic_title || "—",
         createdAt: item.created_date || item.updated_date || "",
         source: item.type || item.status || "uploaded",
         entity: "StudyMaterial",
         entityRecord: item,
         deleteLabel: item.title || "material",
-        openExternalUrl: item.file_url || "",
-        searchText: `${item.title || ""} ${item.summary || ""} ${item.type || ""}`.toLowerCase(),
+        openExternalUrl: normalizeExternalUrl(item.file_url || ""),
+        searchText:
+          `${item.title || ""} ${item.summary || ""} ${item.type || ""}`.toLowerCase(),
       });
     });
 
@@ -109,9 +152,13 @@ export default function Library() {
         entity: "StudyGuide",
         entityRecord: item,
         deleteLabel: item.title || "guide",
-        openLink: isMindMap && item.course_id ? `/mindmap?course=${item.course_id}` : "",
+        openLink:
+          isMindMap && item.course_id
+            ? `/mindmap?course=${item.course_id}`
+            : "",
         exportGuide: true,
-        searchText: `${item.title || ""} ${item.source || ""} ${(item.key_concepts || []).join(" ")}`.toLowerCase(),
+        searchText:
+          `${item.title || ""} ${item.source || ""} ${(item.key_concepts || []).join(" ")}`.toLowerCase(),
       });
     });
 
@@ -123,18 +170,24 @@ export default function Library() {
         courseId: item.course_id || "",
         topicId: item.topic_id || "",
         courseTitle: courseById.get(item.course_id)?.title || "No course",
-        topicTitle: topicById.get(item.topic_id)?.title || item.topic_title || "—",
+        topicTitle:
+          topicById.get(item.topic_id)?.title || item.topic_title || "—",
         createdAt: item.created_date || item.updated_date || "",
         source: `${item.card_count || 0} cards`,
         entity: "FlashcardDeck",
         entityRecord: item,
         deleteLabel: item.title || "flashcard deck",
-        searchText: `${item.title || ""} ${item.topic_title || ""}`.toLowerCase(),
+        searchText:
+          `${item.title || ""} ${item.topic_title || ""}`.toLowerCase(),
       });
     });
 
     quizzes.forEach((item) => {
-      const questionCount = quizQuestions.filter((question) => question.quiz_id === item.id).length || item.question_count || 0;
+      const questionCount =
+        quizQuestions.filter((question) => question.quiz_id === item.id)
+          .length ||
+        item.question_count ||
+        0;
       result.push({
         id: `quiz-${item.id}`,
         type: "quiz",
@@ -142,13 +195,15 @@ export default function Library() {
         courseId: item.course_id || "",
         topicId: item.topic_id || "",
         courseTitle: courseById.get(item.course_id)?.title || "No course",
-        topicTitle: topicById.get(item.topic_id)?.title || item.topic_title || "—",
+        topicTitle:
+          topicById.get(item.topic_id)?.title || item.topic_title || "—",
         createdAt: item.created_date || item.updated_date || "",
         source: `${questionCount} questions`,
         entity: "Quiz",
         entityRecord: item,
         deleteLabel: item.title || "quiz",
-        searchText: `${item.title || ""} ${item.description || ""}`.toLowerCase(),
+        searchText:
+          `${item.title || ""} ${item.description || ""}`.toLowerCase(),
       });
     });
 
@@ -160,14 +215,16 @@ export default function Library() {
         courseId: item.course_id || "",
         topicId: item.topic_id || "",
         courseTitle: courseById.get(item.course_id)?.title || "No course",
-        topicTitle: topicById.get(item.topic_id)?.title || item.topic_title || "—",
+        topicTitle:
+          topicById.get(item.topic_id)?.title || item.topic_title || "—",
         createdAt: item.created_date || item.updated_date || "",
         source: "manual note",
         entity: "Note",
         entityRecord: item,
         deleteLabel: item.title || "note",
         exportNote: true,
-        searchText: `${item.title || ""} ${item.content || ""} ${(item.tags || []).join(" ")}`.toLowerCase(),
+        searchText:
+          `${item.title || ""} ${item.content || ""} ${(item.tags || []).join(" ")}`.toLowerCase(),
       });
     });
 
@@ -179,7 +236,8 @@ export default function Library() {
         courseId: item.course_id || "",
         topicId: item.topic_id || "",
         courseTitle: courseById.get(item.course_id)?.title || "No course",
-        topicTitle: topicById.get(item.topic_id)?.title || item.topic_title || "—",
+        topicTitle:
+          topicById.get(item.topic_id)?.title || item.topic_title || "—",
         createdAt: item.created_date || item.updated_date || "",
         source: `${item.message_count || item.messages?.length || 0} messages`,
         entity: "SavedAIAnswer",
@@ -198,18 +256,34 @@ export default function Library() {
         courseId: item.course_id || "",
         topicId: item.topic_id || "",
         courseTitle: courseById.get(item.course_id)?.title || "No course",
-        topicTitle: topicById.get(item.topic_id)?.title || item.topic_title || "—",
+        topicTitle:
+          topicById.get(item.topic_id)?.title || item.topic_title || "—",
         createdAt: item.created_date || item.updated_date || "",
         source: item.context || "saved answer",
         entity: "SavedAIAnswer",
         entityRecord: item,
         deleteLabel: "saved AI answer",
-        searchText: `${item.question || ""} ${item.answer || ""} ${item.context || ""}`.toLowerCase(),
+        searchText:
+          `${item.question || ""} ${item.answer || ""} ${item.context || ""}`.toLowerCase(),
       });
     });
 
-    return result.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-  }, [courses, decks, guides, materials, notes, quizQuestions, quizzes, savedAnswers, topics]);
+    return result.sort(
+      (a, b) =>
+        new Date(b.createdAt || 0).getTime() -
+        new Date(a.createdAt || 0).getTime(),
+    );
+  }, [
+    courses,
+    decks,
+    guides,
+    materials,
+    notes,
+    quizQuestions,
+    quizzes,
+    savedAnswers,
+    topics,
+  ]);
 
   const typeOptions = useMemo(() => {
     const types = [...new Set(rows.map((row) => row.type))];
@@ -233,13 +307,17 @@ export default function Library() {
   }, [filterCourse, filterTopic, filterType, rows, search]);
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const safePage = Math.min(page, totalPages);
-  const pagedRows = filteredRows.slice((safePage - 1) * pageSize, safePage * pageSize);
-
-  if (loading) return (
-    <div className="flex items-center justify-center h-full">
-      <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
-    </div>
+  const pagedRows = filteredRows.slice(
+    (safePage - 1) * pageSize,
+    safePage * pageSize,
   );
+
+  if (loading)
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+      </div>
+    );
 
   return (
     <div className="h-full overflow-hidden bg-background">
@@ -256,30 +334,60 @@ export default function Library() {
           }}
           searchPlaceholder="Search artifacts or chats..."
         >
-          <Select value={filterCourse} onValueChange={(value) => { setFilterCourse(value); setPage(1); }}>
-            <SelectTrigger className="w-full md:w-52"><SelectValue placeholder="Course" /></SelectTrigger>
+          <Select
+            value={filterCourse}
+            onValueChange={(value) => {
+              setFilterCourse(value);
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="w-full md:w-52">
+              <SelectValue placeholder="Course" />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All courses</SelectItem>
               {courses.map((course) => (
-                <SelectItem key={course.id} value={course.id}>{course.title}</SelectItem>
+                <SelectItem key={course.id} value={course.id}>
+                  {course.title}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
-          <Select value={filterTopic} onValueChange={(value) => { setFilterTopic(value); setPage(1); }}>
-            <SelectTrigger className="w-full md:w-56"><SelectValue placeholder="Topic" /></SelectTrigger>
+          <Select
+            value={filterTopic}
+            onValueChange={(value) => {
+              setFilterTopic(value);
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="w-full md:w-56">
+              <SelectValue placeholder="Topic" />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All topics</SelectItem>
               {topics.map((topic) => (
-                <SelectItem key={topic.id} value={topic.id}>{topic.title}</SelectItem>
+                <SelectItem key={topic.id} value={topic.id}>
+                  {topic.title}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
-          <Select value={filterType} onValueChange={(value) => { setFilterType(value); setPage(1); }}>
-            <SelectTrigger className="w-full md:w-48"><SelectValue placeholder="Type" /></SelectTrigger>
+          <Select
+            value={filterType}
+            onValueChange={(value) => {
+              setFilterType(value);
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="w-full md:w-48">
+              <SelectValue placeholder="Type" />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All types</SelectItem>
               {typeOptions.map((type) => (
-                <SelectItem key={type} value={type}>{TYPE_LABEL[type] || type}</SelectItem>
+                <SelectItem key={type} value={type}>
+                  {TYPE_LABEL[type] || type}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -287,101 +395,128 @@ export default function Library() {
 
         <div className="bg-card border rounded-lg min-h-0 flex-1 overflow-hidden flex flex-col">
           {filteredRows.length === 0 ? (
-            <p className="p-8 text-center text-sm text-muted-foreground">No items match your current filters.</p>
+            <p className="p-8 text-center text-sm text-muted-foreground">
+              No items match your current filters.
+            </p>
           ) : (
             <>
-            <div className="min-h-0 flex-1 overflow-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Course</TableHead>
-                  <TableHead>Topic</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead>Source</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {pagedRows.map((row) => (
-                  <TableRow key={row.id}>
-                    <TableCell>
-                      <div className="min-w-0">
-                        <p className="text-xs uppercase tracking-wide text-muted-foreground">{TYPE_LABEL[row.type] || row.type}</p>
-                        <p className="font-medium truncate">{row.title}</p>
-                      </div>
-                    </TableCell>
-                    <TableCell>{row.courseTitle}</TableCell>
-                    <TableCell>{row.topicTitle || "—"}</TableCell>
-                    <TableCell>{row.createdAt ? new Date(row.createdAt).toLocaleDateString() : "—"}</TableCell>
-                    <TableCell className="max-w-[240px] truncate">{row.source}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        {row.openLink && (
-                          <Link to={row.openLink} className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
-                            Open <ExternalLink className="w-3.5 h-3.5" />
-                          </Link>
-                        )}
-                        {row.openExternalUrl && (
-                          <a href={row.openExternalUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
-                            View file <ExternalLink className="w-3.5 h-3.5" />
-                          </a>
-                        )}
-                        {row.exportGuide && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const guide = row.entityRecord;
-                              const filename = `${(guide.title || "study-guide").toLowerCase().replace(/[^a-z0-9]+/g, "-") || "study-guide"}.md`;
-                              const content = Array.isArray(guide.sections)
-                                ? guide.sections.map((section, index) => `## ${section.title || `Section ${index + 1}`}\n\n${section.content || ""}`).join("\n\n")
-                                : "";
-                              downloadNotesMarkdown(filename, { title: guide.title || "Study guide", content });
-                            }}
-                            className="text-muted-foreground hover:text-primary transition-colors"
-                            aria-label="Export guide"
-                          >
-                            <Download className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                        {row.exportNote && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const note = row.entityRecord;
-                              const filename = `${(note.title || "note").toLowerCase().replace(/[^a-z0-9]+/g, "-") || "note"}.md`;
-                              downloadNotesMarkdown(filename, note);
-                            }}
-                            className="text-muted-foreground hover:text-primary transition-colors"
-                            aria-label="Export note"
-                          >
-                            <Download className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                        <DeleteActionButton
-                          entityName={row.entity}
-                          item={row.entityRecord}
-                          label={row.deleteLabel}
-                          onDeleted={loadData}
-                          ariaLabel="Delete row"
-                        />
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            </div>
-            <DataTablePagination
-              page={safePage}
-              pageSize={pageSize}
-              total={filteredRows.length}
-              onPageChange={setPage}
-              onPageSizeChange={(size) => {
-                setPageSize(size);
-                setPage(1);
-              }}
-            />
+              <div className="min-h-0 flex-1 overflow-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Course</TableHead>
+                      <TableHead>Topic</TableHead>
+                      <TableHead>Created</TableHead>
+                      <TableHead>Source</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pagedRows.map((row) => (
+                      <TableRow key={row.id}>
+                        <TableCell>
+                          <div className="min-w-0">
+                            <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                              {TYPE_LABEL[row.type] || row.type}
+                            </p>
+                            <p className="font-medium truncate">{row.title}</p>
+                          </div>
+                        </TableCell>
+                        <TableCell>{row.courseTitle}</TableCell>
+                        <TableCell>{row.topicTitle || "—"}</TableCell>
+                        <TableCell>
+                          {row.createdAt
+                            ? new Date(row.createdAt).toLocaleDateString()
+                            : "—"}
+                        </TableCell>
+                        <TableCell className="max-w-[240px] truncate">
+                          {row.source}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            {row.openLink && (
+                              <Link
+                                to={row.openLink}
+                                className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                              >
+                                Open <ExternalLink className="w-3.5 h-3.5" />
+                              </Link>
+                            )}
+                            {row.openExternalUrl && (
+                              <a
+                                href={row.openExternalUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                              >
+                                View file{" "}
+                                <ExternalLink className="w-3.5 h-3.5" />
+                              </a>
+                            )}
+                            {row.exportGuide && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const guide = row.entityRecord;
+                                  const filename = `${(guide.title || "study-guide").toLowerCase().replace(/[^a-z0-9]+/g, "-") || "study-guide"}.md`;
+                                  const content = Array.isArray(guide.sections)
+                                    ? guide.sections
+                                        .map(
+                                          (section, index) =>
+                                            `## ${section.title || `Section ${index + 1}`}\n\n${section.content || ""}`,
+                                        )
+                                        .join("\n\n")
+                                    : "";
+                                  downloadNotesMarkdown(filename, {
+                                    title: guide.title || "Study guide",
+                                    content,
+                                  });
+                                }}
+                                className="text-muted-foreground hover:text-primary transition-colors"
+                                aria-label="Export guide"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            {row.exportNote && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const note = row.entityRecord;
+                                  const filename = `${(note.title || "note").toLowerCase().replace(/[^a-z0-9]+/g, "-") || "note"}.md`;
+                                  downloadNotesMarkdown(filename, note);
+                                }}
+                                className="text-muted-foreground hover:text-primary transition-colors"
+                                aria-label="Export note"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            <DeleteActionButton
+                              entityName={row.entity}
+                              item={row.entityRecord}
+                              label={row.deleteLabel}
+                              onDeleted={loadData}
+                              ariaLabel="Delete row"
+                            />
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              <DataTablePagination
+                page={safePage}
+                pageSize={pageSize}
+                total={filteredRows.length}
+                onPageChange={setPage}
+                onPageSizeChange={(size) => {
+                  setPageSize(size);
+                  setPage(1);
+                }}
+              />
             </>
           )}
         </div>

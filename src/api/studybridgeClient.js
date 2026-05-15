@@ -3,11 +3,26 @@ import { isDesktopApp } from "@/lib/runtime";
 const isDesktopRuntime = isDesktopApp();
 const geminiModel = import.meta.env.VITE_GEMINI_MODEL || "gemini-2.5-flash";
 const openAiModel = import.meta.env.VITE_OPENAI_MODEL || "";
-const anthropicModel = import.meta.env.VITE_ANTHROPIC_MODEL || "claude-sonnet-4-0";
+const anthropicModel =
+  import.meta.env.VITE_ANTHROPIC_MODEL || "claude-sonnet-4-0";
+const LARGE_FILE_CONFIRM_BYTES = 25 * 1024 * 1024;
+
+function formatFileSize(bytes = 0) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const order = Math.min(
+    Math.floor(Math.log(bytes) / Math.log(1024)),
+    units.length - 1,
+  );
+  const value = bytes / 1024 ** order;
+  return `${value.toFixed(value >= 10 || order === 0 ? 0 : 1)} ${units[order]}`;
+}
 
 function ensureDesktopRuntime() {
   if (isDesktopRuntime && window.studybridgeDesktop) return;
-  throw new Error("Desktop runtime required. Launch StudyBridge via the Windows installer or the desktop dev command.");
+  throw new Error(
+    "Desktop runtime required. Launch StudyBridge via the Windows installer or the desktop dev command.",
+  );
 }
 
 const entityTables = {
@@ -132,7 +147,8 @@ function buildSchemaHint(schema) {
 }
 
 async function getDesktopRuntime() {
-  if (!isDesktopRuntime || !window.studybridgeDesktop?.getRuntimeConfig) return null;
+  if (!isDesktopRuntime || !window.studybridgeDesktop?.getRuntimeConfig)
+    return null;
   try {
     return await window.studybridgeDesktop.getRuntimeConfig();
   } catch {
@@ -141,7 +157,8 @@ async function getDesktopRuntime() {
 }
 
 async function getDesktopAiSettings() {
-  if (!isDesktopRuntime || !window.studybridgeDesktop?.getAiSettings) return null;
+  if (!isDesktopRuntime || !window.studybridgeDesktop?.getAiSettings)
+    return null;
   try {
     return await window.studybridgeDesktop.getAiSettings();
   } catch {
@@ -150,7 +167,8 @@ async function getDesktopAiSettings() {
 }
 
 async function waitForLocalRuntime() {
-  if (!isDesktopRuntime || !window.studybridgeDesktop?.waitForLocalAi) return null;
+  if (!isDesktopRuntime || !window.studybridgeDesktop?.waitForLocalAi)
+    return null;
   try {
     return await window.studybridgeDesktop.waitForLocalAi();
   } catch {
@@ -198,19 +216,22 @@ async function listLocalRows(entityName) {
 
 async function createLocalRow(entityName, payload) {
   const bridge = getDesktopDataBridge();
-  if (!bridge?.createLocalEntity) throw new Error("Local storage is unavailable.");
+  if (!bridge?.createLocalEntity)
+    throw new Error("Local storage is unavailable.");
   return bridge.createLocalEntity(entityName, payload);
 }
 
 async function updateLocalRow(entityName, id, payload) {
   const bridge = getDesktopDataBridge();
-  if (!bridge?.updateLocalEntity) throw new Error("Local storage is unavailable.");
+  if (!bridge?.updateLocalEntity)
+    throw new Error("Local storage is unavailable.");
   return bridge.updateLocalEntity(entityName, id, payload);
 }
 
 async function deleteLocalRow(entityName, id) {
   const bridge = getDesktopDataBridge();
-  if (!bridge?.deleteLocalEntity) throw new Error("Local storage is unavailable.");
+  if (!bridge?.deleteLocalEntity)
+    throw new Error("Local storage is unavailable.");
   return bridge.deleteLocalEntity(entityName, id);
 }
 
@@ -226,13 +247,27 @@ async function getLocalProfile() {
 
 async function updateLocalProfile(payload) {
   const bridge = getDesktopDataBridge();
-  if (!bridge?.updateLocalProfile) throw new Error("Local storage is unavailable.");
+  if (!bridge?.updateLocalProfile)
+    throw new Error("Local storage is unavailable.");
   return bridge.updateLocalProfile(payload);
 }
 
 async function uploadLocalFile(file) {
   const bridge = getDesktopDataBridge();
-  if (!bridge?.uploadLocalFile) throw new Error("Local storage is unavailable.");
+  if (!bridge?.uploadLocalFile)
+    throw new Error("Local storage is unavailable.");
+
+  if (file?.size > LARGE_FILE_CONFIRM_BYTES) {
+    const confirmed = window.confirm(
+      `This file is ${formatFileSize(file.size)}. Upload anyway?`,
+    );
+    if (!confirmed) {
+      const error = new Error("Upload cancelled by user.");
+      error.code = "UPLOAD_CANCELLED";
+      throw error;
+    }
+  }
+
   const buffer = await file.arrayBuffer();
   return bridge.uploadLocalFile({
     name: file.name,
@@ -243,11 +278,17 @@ async function uploadLocalFile(file) {
 
 async function deleteLocalFile(fileUrl) {
   const bridge = getDesktopDataBridge();
-  if (!bridge?.deleteLocalFile) throw new Error("Local storage is unavailable.");
+  if (!bridge?.deleteLocalFile)
+    throw new Error("Local storage is unavailable.");
   return bridge.deleteLocalFile(fileUrl);
 }
 
-async function invokeGoogleGemini({ prompt, response_json_schema, apiKey, model = geminiModel }) {
+async function invokeGoogleGemini({
+  prompt,
+  response_json_schema,
+  apiKey,
+  model = geminiModel,
+}) {
   if (isDesktopRuntime && window.studybridgeDesktop?.invokeCloudProvider) {
     return invokeDesktopCloudProvider({
       provider: "google",
@@ -258,33 +299,40 @@ async function invokeGoogleGemini({ prompt, response_json_schema, apiKey, model 
   }
 
   if (!apiKey) {
-    const error = new Error("AI is disabled. Open Settings to download Gemma locally or add a cloud API key.");
+    const error = new Error(
+      "AI is disabled. Open Settings to download Gemma locally or add a cloud API key.",
+    );
     error.code = "AI_UNAVAILABLE";
     throw error;
   }
 
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              text: `${prompt}${buildSchemaHint(response_json_schema)}`,
-            },
-          ],
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts: [
+              {
+                text: `${prompt}${buildSchemaHint(response_json_schema)}`,
+              },
+            ],
+          },
+        ],
+        generationConfig: {
+          temperature: response_json_schema ? 0.15 : 0.35,
+          topP: 0.9,
+          maxOutputTokens: response_json_schema ? 2048 : 1024,
+          ...(response_json_schema
+            ? { responseMimeType: "application/json" }
+            : {}),
         },
-      ],
-      generationConfig: {
-        temperature: response_json_schema ? 0.15 : 0.35,
-        topP: 0.9,
-        maxOutputTokens: response_json_schema ? 2048 : 1024,
-        ...(response_json_schema ? { responseMimeType: "application/json" } : {}),
-      },
-    }),
-  });
+      }),
+    },
+  );
 
   if (!response.ok) {
     const details = await response.text();
@@ -292,11 +340,19 @@ async function invokeGoogleGemini({ prompt, response_json_schema, apiKey, model 
   }
 
   const data = await response.json();
-  const text = data?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("") || "";
+  const text =
+    data?.candidates?.[0]?.content?.parts
+      ?.map((part) => part.text || "")
+      .join("") || "";
   return response_json_schema ? extractJson(text) : text;
 }
 
-async function invokeOpenAi({ prompt, response_json_schema, apiKey, model = openAiModel }) {
+async function invokeOpenAi({
+  prompt,
+  response_json_schema,
+  apiKey,
+  model = openAiModel,
+}) {
   if (isDesktopRuntime && window.studybridgeDesktop?.invokeCloudProvider) {
     return invokeDesktopCloudProvider({
       provider: "openai",
@@ -307,13 +363,17 @@ async function invokeOpenAi({ prompt, response_json_schema, apiKey, model = open
   }
 
   if (!apiKey) {
-    const error = new Error("OpenAI API key missing. Open Settings to add your key.");
+    const error = new Error(
+      "OpenAI API key missing. Open Settings to add your key.",
+    );
     error.code = "AI_UNAVAILABLE";
     throw error;
   }
 
   if (!model) {
-    throw new Error("OpenAI model missing. Use Codex CLI for default-profile OpenAI access, or explicitly configure an API model.");
+    throw new Error(
+      "OpenAI model missing. Use Codex CLI for default-profile OpenAI access, or explicitly configure an API model.",
+    );
   }
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -338,7 +398,9 @@ async function invokeOpenAi({ prompt, response_json_schema, apiKey, model = open
       temperature: response_json_schema ? 0.15 : 0.35,
       top_p: 0.9,
       max_tokens: response_json_schema ? 2048 : 1024,
-      ...(response_json_schema ? { response_format: { type: "json_object" } } : {}),
+      ...(response_json_schema
+        ? { response_format: { type: "json_object" } }
+        : {}),
     }),
   });
 
@@ -352,7 +414,12 @@ async function invokeOpenAi({ prompt, response_json_schema, apiKey, model = open
   return response_json_schema ? extractJson(text) : text;
 }
 
-async function invokeAnthropic({ prompt, response_json_schema, apiKey, model = anthropicModel }) {
+async function invokeAnthropic({
+  prompt,
+  response_json_schema,
+  apiKey,
+  model = anthropicModel,
+}) {
   if (isDesktopRuntime && window.studybridgeDesktop?.invokeCloudProvider) {
     return invokeDesktopCloudProvider({
       provider: "anthropic",
@@ -363,7 +430,9 @@ async function invokeAnthropic({ prompt, response_json_schema, apiKey, model = a
   }
 
   if (!apiKey) {
-    const error = new Error("Anthropic API key missing. Open Settings to add your key.");
+    const error = new Error(
+      "Anthropic API key missing. Open Settings to add your key.",
+    );
     error.code = "AI_UNAVAILABLE";
     throw error;
   }
@@ -410,7 +479,12 @@ function createEntityClient(entityName) {
 
   return {
     async list(sortExpression, limit) {
-      const rows = sortRows((await listLocalRows(entityName)).map((row) => flattenRow(row, entityName)), sortExpression);
+      const rows = sortRows(
+        (await listLocalRows(entityName)).map((row) =>
+          flattenRow(row, entityName),
+        ),
+        sortExpression,
+      );
       return typeof limit === "number" ? rows.slice(0, limit) : rows;
     },
 
@@ -427,7 +501,11 @@ function createEntityClient(entityName) {
     },
 
     async update(id, payload) {
-      const row = await updateLocalRow(entityName, id, withDefaults(entityName, payload));
+      const row = await updateLocalRow(
+        entityName,
+        id,
+        withDefaults(entityName, payload),
+      );
       return flattenRow(row, entityName);
     },
 
@@ -440,16 +518,21 @@ function createEntityClient(entityName) {
 
 async function getCurrentUser() {
   ensureDesktopRuntime();
-  return getLocalProfile() || {
-    id: "local-user",
-    email: "student@example.com",
-    full_name: "Student",
-  };
+  return (
+    getLocalProfile() || {
+      id: "local-user",
+      email: "student@example.com",
+      full_name: "Student",
+    }
+  );
 }
 
 export const studybridge = {
   entities: Object.fromEntries(
-    Object.keys(entityTables).map((entityName) => [entityName, createEntityClient(entityName)]),
+    Object.keys(entityTables).map((entityName) => [
+      entityName,
+      createEntityClient(entityName),
+    ]),
   ),
 
   auth: {
@@ -483,41 +566,79 @@ export const studybridge = {
         ensureDesktopRuntime();
         const desktopRuntime = await getDesktopRuntime();
         const desktopAiSettings = await getDesktopAiSettings();
-        const desktopMode = desktopRuntime?.aiMode || desktopAiSettings?.mode || "disabled";
+        const desktopMode =
+          desktopRuntime?.aiMode || desktopAiSettings?.mode || "disabled";
         if (desktopMode === "codex") {
           return invokeDesktopCodex(payload);
         }
 
-        const desktopCloudProvider = desktopAiSettings?.cloudProvider || desktopRuntime?.cloudProvider || "google";
-        const desktopCloudModel = desktopAiSettings?.[`${desktopCloudProvider === "google" ? "googleModel" : desktopCloudProvider === "openai" ? "openAiModel" : "anthropicModel"}`]
-          || desktopRuntime?.cloudModel
-          || (desktopCloudProvider === "google" ? geminiModel : desktopCloudProvider === "openai" ? "" : anthropicModel);
+        const desktopCloudProvider =
+          desktopAiSettings?.cloudProvider ||
+          desktopRuntime?.cloudProvider ||
+          "google";
+        const desktopCloudModel =
+          desktopAiSettings?.[
+            `${desktopCloudProvider === "google" ? "googleModel" : desktopCloudProvider === "openai" ? "openAiModel" : "anthropicModel"}`
+          ] ||
+          desktopRuntime?.cloudModel ||
+          (desktopCloudProvider === "google"
+            ? geminiModel
+            : desktopCloudProvider === "openai"
+              ? ""
+              : anthropicModel);
 
         if (desktopMode === "local") {
-          if (["error", "disabled", "missing_provider", "missing_model", "starting", "downloading-model"].includes(desktopRuntime?.status)) {
-            const error = new Error("AI is disabled. Open Settings to download Gemma locally or add a cloud API key.");
+          if (
+            [
+              "error",
+              "disabled",
+              "missing_provider",
+              "missing_model",
+              "starting",
+              "downloading-model",
+            ].includes(desktopRuntime?.status)
+          ) {
+            const error = new Error(
+              "AI is disabled. Open Settings to download Gemma locally or add a cloud API key.",
+            );
             error.code = "AI_UNAVAILABLE";
             throw error;
           }
 
           const runtimeAfterWait = await waitForLocalRuntime();
-          if (["error", "disabled", "missing_provider", "missing_model", "starting", "downloading-model"].includes(runtimeAfterWait?.status)) {
-            const error = new Error(runtimeAfterWait.error || "AI is disabled. Open Settings to download Gemma locally or add a cloud API key.");
+          if (
+            [
+              "error",
+              "disabled",
+              "missing_provider",
+              "missing_model",
+              "starting",
+              "downloading-model",
+            ].includes(runtimeAfterWait?.status)
+          ) {
+            const error = new Error(
+              runtimeAfterWait.error ||
+                "AI is disabled. Open Settings to download Gemma locally or add a cloud API key.",
+            );
             error.code = "AI_UNAVAILABLE";
             throw error;
           }
           return invokeDesktopLocalProvider({
             ...payload,
-            model: runtimeAfterWait?.model || desktopRuntime?.model || "ggml-org/gemma-4-E2B-it-GGUF:Q8_0",
+            model:
+              runtimeAfterWait?.model ||
+              desktopRuntime?.model ||
+              "ggml-org/gemma-4-E2B-it-GGUF:Q8_0",
           });
         }
 
         if (desktopMode === "cloud") {
-          const desktopCloudKey = desktopCloudProvider === "openai"
-            ? desktopAiSettings?.openAiApiKey
-            : desktopCloudProvider === "anthropic"
-              ? desktopAiSettings?.anthropicApiKey
-              : desktopAiSettings?.googleApiKey;
+          const desktopCloudKey =
+            desktopCloudProvider === "openai"
+              ? desktopAiSettings?.openAiApiKey
+              : desktopCloudProvider === "anthropic"
+                ? desktopAiSettings?.anthropicApiKey
+                : desktopAiSettings?.googleApiKey;
 
           if (desktopCloudProvider === "openai") {
             return invokeOpenAi({
@@ -542,7 +663,9 @@ export const studybridge = {
           });
         }
 
-        const error = new Error("AI is disabled. Open Settings to connect Codex CLI, download Gemma locally, or add a cloud API key.");
+        const error = new Error(
+          "AI is disabled. Open Settings to connect Codex CLI, download Gemma locally, or add a cloud API key.",
+        );
         error.code = "AI_UNAVAILABLE";
         throw error;
       },

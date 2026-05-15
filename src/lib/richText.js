@@ -1,3 +1,7 @@
+import DOMPurify from "dompurify";
+
+const isBrowser = typeof window !== "undefined";
+
 function escapeHtml(value = "") {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -11,6 +15,16 @@ export function looksLikeHtml(value = "") {
   return /<[^>]+>/.test(String(value || ""));
 }
 
+export function sanitizeHtml(value = "") {
+  const raw = String(value || "");
+  if (!isBrowser) return raw;
+  try {
+    return DOMPurify.sanitize(raw, { USE_PROFILES: { html: true } });
+  } catch {
+    return raw;
+  }
+}
+
 function formatInlineMarkdown(line = "") {
   let next = escapeHtml(line);
   next = next.replace(/`([^`]+)`/g, "<code>$1</code>");
@@ -18,12 +32,17 @@ function formatInlineMarkdown(line = "") {
   next = next.replace(/__([^_]+)__/g, "<strong>$1</strong>");
   next = next.replace(/(^|[^\*])\*([^*]+)\*(?!\*)/g, "$1<em>$2</em>");
   next = next.replace(/(^|[^_])_([^_]+)_(?!_)/g, "$1<em>$2</em>");
-  next = next.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+  next = next.replace(
+    /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+    '<a href="$2" target="_blank" rel="noreferrer">$1</a>',
+  );
   return next;
 }
 
 export function markdownToHtml(markdown = "") {
-  const lines = String(markdown || "").replace(/\r\n/g, "\n").split("\n");
+  const lines = String(markdown || "")
+    .replace(/\r\n/g, "\n")
+    .split("\n");
   const html = [];
   let inUl = false;
   let inOl = false;
@@ -54,7 +73,9 @@ export function markdownToHtml(markdown = "") {
     if (headingMatch) {
       closeLists();
       const level = headingMatch[1].length;
-      html.push(`<h${level}>${formatInlineMarkdown(headingMatch[2])}</h${level}>`);
+      html.push(
+        `<h${level}>${formatInlineMarkdown(headingMatch[2])}</h${level}>`,
+      );
       continue;
     }
     const ulMatch = line.match(/^[-*]\s+(.*)$/);
@@ -85,7 +106,9 @@ export function markdownToHtml(markdown = "") {
     }
     if (line.startsWith(">")) {
       closeLists();
-      html.push(`<blockquote><p>${formatInlineMarkdown(line.replace(/^>\s?/, ""))}</p></blockquote>`);
+      html.push(
+        `<blockquote><p>${formatInlineMarkdown(line.replace(/^>\s?/, ""))}</p></blockquote>`,
+      );
       continue;
     }
     closeLists();
@@ -99,7 +122,6 @@ export function markdownToHtml(markdown = "") {
 export function normalizeRichTextInput(value = "") {
   const content = String(value || "").trim();
   if (!content) return "";
-  if (looksLikeHtml(content)) return content;
+  if (looksLikeHtml(content)) return sanitizeHtml(content);
   return markdownToHtml(content);
 }
-
