@@ -19,6 +19,20 @@ const DEFAULT_CONTEXT_LIMITS = {
   planner_item_limit: 8,
 };
 
+export function buildStudyModeGuidance(mode = "explain") {
+  switch (mode) {
+    case "worked_example":
+      return "Start with a concrete worked example, then break it into steps and explain why each step was used. After the example, ask the student to justify the steps back to you.";
+    case "practice":
+      return "Favor retrieval practice and short prompts. Ask the student to answer before giving the explanation, then correct the answer with minimal extra noise.";
+    case "review":
+      return "Focus on mistakes, shaky concepts, and the next review action. Keep the answer concise and push the student toward spaced review and correction.";
+    case "explain":
+    default:
+      return "Explain clearly and concisely first, then check understanding with a short follow-up.";
+  }
+}
+
 export function getContextLimits(profile = {}) {
   return {
     ...DEFAULT_CONTEXT_LIMITS,
@@ -134,14 +148,117 @@ function buildMaterialPassages(materials = [], { course, topic, limits }) {
     .slice(0, passageLimit);
 }
 
-export async function loadProfileContext() {
-  const profile = await studybridge.auth.me();
-  return buildProfileContext(profile);
-}
+function buildSourceCatalog({
+  profile,
+  course,
+  topic,
+  topics = [],
+  materials = [],
+  notes = [],
+  sessions = [],
+  tasks = [],
+  passages = [],
+  limits,
+}) {
+  const catalog = [
+    {
+      id: "profile",
+      label: "Profile",
+      detail: buildProfileContext(profile).split("\n").slice(0, 4).join(" • "),
+    },
+    {
+      id: "course",
+      label: course ? `Course: ${course.title}${course.code ? ` (${course.code})` : ""}` : "Course",
+      detail: course?.exam_date ? `Exam date ${course.exam_date}` : "No course selected.",
+    },
+    {
+      id: "current-topic",
+      label: topic ? `Current topic: ${topic.title}` : "Current topic",
+      detail: topic
+        ? `Mastery ${topic.mastery_level || 0}% • confidence ${topic.confidence || 0}/5 • status ${topic.status || "not_started"}`
+        : "No topic selected.",
+    },
+    {
+      id: "exam",
+      label: "Exam",
+      detail: course?.exam_date ? `Exam date ${course.exam_date}` : "Exam date not set.",
+    },
+    {
+      id: "topics",
+      label: "Topics index",
+      detail: topics.length > 0 ? `${Math.min(topics.length, limits.topic_limit)} topic${topics.length === 1 ? "" : "s"} available` : "No topics yet.",
+    },
+    {
+      id: "materials",
+      label: "Materials index",
+      detail: materials.length > 0 ? `${Math.min(materials.length, limits.material_limit)} material${materials.length === 1 ? "" : "s"} available` : "No materials yet.",
+    },
+    {
+      id: "notes",
+      label: "Notes index",
+      detail: notes.length > 0 ? `${Math.min(notes.length, limits.note_limit)} note${notes.length === 1 ? "" : "s"} available` : "No notes yet.",
+    },
+    {
+      id: "sessions",
+      label: "Sessions index",
+      detail: sessions.length > 0 ? `${Math.min(sessions.length, limits.session_limit)} recent session${sessions.length === 1 ? "" : "s"} available` : "No recent sessions yet.",
+    },
+    {
+      id: "tasks",
+      label: "Tasks index",
+      detail: tasks.length > 0 ? `${Math.min(tasks.length, limits.task_limit)} open task${tasks.length === 1 ? "" : "s"} available` : "No open tasks yet.",
+    },
+  ];
 
-export async function loadStudyContext({ course, topic }) {
-  const bundle = await loadStudyContextBundle({ course, topic });
-  return bundle.context;
+  topics.slice(0, limits.topic_limit).forEach((item, index) => {
+    catalog.push({
+      id: makeSourceId("topic", index),
+      label: item.title,
+      detail: `Mastery ${item.mastery_level || 0}% • confidence ${item.confidence || 0}/5 • status ${item.status || "not_started"}`,
+    });
+  });
+
+  materials.slice(0, limits.material_limit).forEach((item, index) => {
+    catalog.push({
+      id: makeSourceId("material", index),
+      label: item.title || "Untitled material",
+      detail: `${item.type || "material"} • ${truncate(item.summary || item.extracted_topics?.join(", "), 180)}`,
+    });
+  });
+
+  notes.slice(0, limits.note_limit).forEach((item, index) => {
+    catalog.push({
+      id: makeSourceId("note", index),
+      label: item.title || "Untitled note",
+      detail: truncate(item.content, 180),
+    });
+  });
+
+  sessions.slice(0, limits.session_limit).forEach((item, index) => {
+    catalog.push({
+      id: makeSourceId("session", index),
+      label: item.topic_title || topic?.title || "Study session",
+      detail: `${item.duration_minutes || 0}m • confidence ${item.confidence_before || "?"}->${item.confidence_after || "?"}`,
+    });
+  });
+
+  tasks.filter((item) => item.status !== "completed").slice(0, limits.task_limit).forEach((item, index) => {
+    catalog.push({
+      id: makeSourceId("task", index),
+      label: item.title || "Study task",
+      detail: `${item.priority || "medium"} • due ${item.due_date || "unset"}`,
+    });
+  });
+
+  passages.forEach((item) => {
+    catalog.push({
+      id: item.id,
+      label: item.materialTitle || "Relevant passage",
+      detail: truncate(item.text, 180),
+    });
+  });
+
+  return catalog;
 }
 
 export async function loadStudyContextBundle({ course, topic }) {
@@ -149,7 +266,7 @@ export async function loadStudyContextBundle({ course, topic }) {
   const limits = getContextLimits(profile);
   const filters = course?.id ? { course_id: course.id } : null;
   if (!filters) {
-    return { context: "No course context selected.", sourceIds: [], limits };
+    return { context: "No course context selected.", sourceIds: [], sourceCatalog: [], limits };
   }
 
   const [topics, materials, notes, sessions, tasks] = await Promise.all([
@@ -164,13 +281,19 @@ export async function loadStudyContextBundle({ course, topic }) {
   const relevantNotes = topic?.id ? notes.filter((n) => !n.topic_id || n.topic_id === topic.id) : notes;
   const relevantSessions = topic?.id ? sessions.filter((s) => !s.topic_id || s.topic_id === topic.id) : sessions;
   const relevantPassages = buildMaterialPassages(relevantMaterials.slice(0, limits.material_limit), { course, topic, limits });
-  const sourceIds = ["profile", "course", "current-topic", "exam", "topics", "materials", "notes", "sessions", "tasks"];
-  topics.slice(0, limits.topic_limit).forEach((_, index) => sourceIds.push(makeSourceId("topic", index)));
-  relevantMaterials.slice(0, limits.material_limit).forEach((_, index) => sourceIds.push(makeSourceId("material", index)));
-  relevantNotes.slice(0, limits.note_limit).forEach((_, index) => sourceIds.push(makeSourceId("note", index)));
-  relevantSessions.slice(0, limits.session_limit).forEach((_, index) => sourceIds.push(makeSourceId("session", index)));
-  tasks.filter((t) => t.status !== "completed").slice(0, limits.task_limit).forEach((_, index) => sourceIds.push(makeSourceId("task", index)));
-  relevantPassages.forEach((passage) => sourceIds.push(passage.id));
+  const sourceCatalog = buildSourceCatalog({
+    profile,
+    course,
+    topic,
+    topics,
+    materials: relevantMaterials,
+    notes: relevantNotes,
+    sessions: relevantSessions,
+    tasks,
+    passages: relevantPassages,
+    limits,
+  });
+  const sourceIds = sourceCatalog.map((source) => source.id);
 
   const sections = [
     `[profile] ${buildProfileContext(profile)}`,
@@ -229,31 +352,23 @@ export async function loadPlannerContext() {
   ].join("\n\n");
 }
 
-export async function loadProgressContext() {
-  const profile = await studybridge.auth.me();
-  const limits = getContextLimits(profile);
-  const [courses, topics, sessions] = await Promise.all([
-    studybridge.entities.Course.list("-created_date", 50),
-    studybridge.entities.Topic.list("-mastery_level", 200),
-    studybridge.entities.StudySession.list("-created_date", 50),
-  ]);
-
-  return [
-    buildProfileContext(profile),
-    "",
-    `Courses tracked: ${Math.min(courses.length, limits.course_limit)} active course bundles in context`,
-    `Total topics in context: ${topics.length}`,
-    `Recent sessions: ${sessions.slice(0, limits.session_limit).map((s) => `${s.course_title || "Course"} / ${s.topic_title || "Topic"} (${s.duration_minutes || 0}m)`).join("; ") || "none"}`,
-    profile.daily_goal_minutes ? `Weekly goal pace: ${profile.daily_goal_minutes * 7} minutes per week` : null,
-  ].join("\n\n");
-}
-
-export function buildTutorPrompt({ course, topic, context, depth, history, studentText }) {
+export function buildTutorPrompt(args = {}) {
+  const {
+    course,
+    topic,
+    context,
+    depth,
+    history,
+    studentText,
+    sourceCatalog = [],
+    studyMode = "explain",
+  } = args;
   const focus = topic
     ? `Focus on "${topic.title}" in "${course?.title || "the selected course"}".`
     : course
       ? `Focus on "${course.title}".`
       : "No course is selected, so answer as a general study tutor.";
+  const modeGuidance = buildStudyModeGuidance(studyMode);
 
   return `You are StudyBridge, an integrated university study companion. Use the student's actual course data below as primary context. If context is missing, say what is missing and still help.
 
@@ -261,9 +376,14 @@ If the profile context includes a preferred UI language, reply in that language 
 
 ${focus}
 Depth: ${depth || "intermediate"}
+Study mode: ${studyMode || "explain"}
+Mode guidance: ${modeGuidance}
 
 StudyBridge context:
 ${context}
+
+Source catalog:
+${sourceCatalog.length > 0 ? sourceCatalog.map((source) => `- [${source.id}] ${source.label}${source.detail ? ` — ${source.detail}` : ""}`).join("\n") : "none"}
 
 Conversation history:
 ${history.slice(-8).map((m) => `${m.role}: ${m.content}`).join("\n") || "No previous messages."}

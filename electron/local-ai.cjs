@@ -204,6 +204,22 @@ async function ensureLlamaBinary(app) {
   return { ...preset, binaryPath };
 }
 
+async function getCachedLlamaBinary(app) {
+  const preset = getHardwarePreset();
+  const rootDir = path.join(app.getPath("userData"), "llama.cpp");
+  const manifestsDir = path.join(rootDir, "manifests");
+  const manifestPath = path.join(manifestsDir, "binary.json");
+
+  try {
+    const existing = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+    if (!existing?.binaryPath) return null;
+    await fs.access(existing.binaryPath);
+    return { ...preset, binaryPath: existing.binaryPath, manifest: existing };
+  } catch {
+    return null;
+  }
+}
+
 function waitForServer(url, timeoutMs = 20 * 60 * 1000) {
   const deadline = Date.now() + timeoutMs;
 
@@ -282,4 +298,5 @@ async function startLocalAi(app) {
 module.exports = {
   startLocalAi,
   getHardwarePreset,
+  getCachedLlamaBinary,
 };

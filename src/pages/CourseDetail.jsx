@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { studybridge } from "@/api/studybridgeClient";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, Upload, Brain, FileText, BookOpen, Trash2, GitBranch } from "lucide-react";
+import { ArrowLeft, Plus, Upload, Brain, FileText, Trash2, GitBranch } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -11,6 +11,7 @@ import MaterialUploader from "@/components/courses/MaterialUploader";
 import CourseOverview from "@/components/courses/CourseOverview";
 import AddTopicDialog from "@/components/courses/AddTopicDialog";
 import { confirmAndDelete } from "@/lib/deleteEntity";
+import { goBackOr } from "@/lib/navigation";
 
 export default function CourseDetail() {
   const { courseId: id } = useParams();
@@ -18,30 +19,28 @@ export default function CourseDetail() {
   const [course, setCourse] = useState(null);
   const [topics, setTopics] = useState([]);
   const [materials, setMaterials] = useState([]);
-  const [guides, setGuides] = useState([]);
   const [notes, setNotes] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAddTopic, setShowAddTopic] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
+  const handleBack = () => goBackOr(navigate, "/courses");
 
   useEffect(() => {
     loadData();
   }, [id]);
 
   const loadData = async () => {
-    const [c, tp, m, g, n, s] = await Promise.all([
+    const [c, tp, m, n, s] = await Promise.all([
       studybridge.entities.Course.filter({ id }, null, 1).then(r => r[0]),
       studybridge.entities.Topic.filter({ course_id: id }, "order", 100),
       studybridge.entities.StudyMaterial.filter({ course_id: id }, "-created_date", 50),
-      studybridge.entities.StudyGuide.filter({ course_id: id }, "-created_date", 20),
       studybridge.entities.Note.filter({ course_id: id }, "-created_date", 50),
       studybridge.entities.StudySession.filter({ course_id: id }, "-created_date", 10),
     ]);
     setCourse(c);
     setTopics(tp);
     setMaterials(m);
-    setGuides(g);
     setNotes(n);
     setSessions(s);
     setLoading(false);
@@ -67,13 +66,15 @@ export default function CourseDetail() {
 
   if (!course) {
     return (
-      <div className="p-6 lg:p-8 max-w-3xl mx-auto">
-        <button onClick={() => navigate("/courses")} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="w-4 h-4" /> Back to courses
-        </button>
-        <div className="bg-card border rounded-lg p-8 text-center mt-6">
-          <h1 className="text-lg font-semibold">Course not found</h1>
-          <p className="text-sm text-muted-foreground mt-2">This course may have been deleted or the link is invalid.</p>
+      <div className="h-full overflow-hidden bg-background">
+        <div className="flex h-full min-h-0 w-full flex-col justify-center p-6 lg:p-8">
+          <button onClick={handleBack} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
+            <ArrowLeft className="w-4 h-4" /> Back to courses
+          </button>
+          <div className="bg-card border rounded-lg p-8 text-center mt-6">
+            <h1 className="text-lg font-semibold">Course not found</h1>
+            <p className="text-sm text-muted-foreground mt-2">This course may have been deleted or the link is invalid.</p>
+          </div>
         </div>
       </div>
     );
@@ -83,9 +84,10 @@ export default function CourseDetail() {
   const masteredTopics = topics.filter(t => t.status === "mastered").length;
 
   return (
-    <div className="p-6 lg:p-8 max-w-6xl mx-auto space-y-6">
+    <div className="h-full overflow-hidden bg-background">
+      <div className="flex h-full min-h-0 w-full flex-col gap-6 p-6 lg:p-8">
       <div className="flex items-start gap-4">
-        <button onClick={() => navigate("/courses")} className="mt-1 text-muted-foreground hover:text-foreground">
+        <button onClick={handleBack} className="mt-1 text-muted-foreground hover:text-foreground">
           <ArrowLeft className="w-5 h-5" />
         </button>
         <div className="flex-1">
@@ -118,88 +120,52 @@ export default function CourseDetail() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <Stat label="Progress" value={`${course.overall_progress || 0}%`}>
-          <Progress value={course.overall_progress || 0} className="h-1 mt-1" />
-        </Stat>
-        <Stat label="Topics" value={`${masteredTopics}/${topics.length}`} sublabel="mastered" />
-        <Stat label="Materials" value={materials.length} sublabel="uploaded" />
-        <Stat
-          label="Exam"
-          value={daysUntilExam !== null ? (daysUntilExam >= 0 ? `${daysUntilExam}d` : "Past") : "-"}
-          sublabel={course.exam_date ? format(new Date(course.exam_date), "MMM d, yyyy") : "Not set"}
-          danger={daysUntilExam !== null && daysUntilExam <= 7}
-        />
-      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto pr-1 space-y-6">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <Stat label="Progress" value={`${course.overall_progress || 0}%`}>
+            <Progress value={course.overall_progress || 0} className="h-1 mt-1" />
+          </Stat>
+          <Stat label="Topics" value={`${masteredTopics}/${topics.length}`} sublabel="mastered" />
+          <Stat label="Materials" value={materials.length} sublabel="uploaded" />
+          <Stat
+            label="Exam"
+            value={daysUntilExam !== null ? (daysUntilExam >= 0 ? `${daysUntilExam}d` : "Past") : "-"}
+            sublabel={course.exam_date ? format(new Date(course.exam_date), "MMM d, yyyy") : "Not set"}
+            danger={daysUntilExam !== null && daysUntilExam <= 7}
+          />
+        </div>
 
-      <Tabs defaultValue="overview" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="topics">Topics ({topics.length})</TabsTrigger>
-          <TabsTrigger value="materials">Materials ({materials.length})</TabsTrigger>
-          <TabsTrigger value="guides">Guides ({guides.length})</TabsTrigger>
-          <TabsTrigger value="mindmap">Mind Map ({guides.filter((guide) => guide.source === "mindmap").length})</TabsTrigger>
-          <TabsTrigger value="notes">Notes ({notes.length})</TabsTrigger>
-        </TabsList>
+        <Tabs defaultValue="overview" className="space-y-4">
+          <TabsList>
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="topics">Topics ({topics.length})</TabsTrigger>
+            <TabsTrigger value="materials">Materials ({materials.length})</TabsTrigger>
+            <TabsTrigger value="notes">Notes ({notes.length})</TabsTrigger>
+          </TabsList>
 
-        <TabsContent value="overview">
-          <CourseOverview course={course} topics={topics} sessions={sessions} materials={materials} />
-        </TabsContent>
+          <TabsContent value="overview">
+            <CourseOverview course={course} topics={topics} sessions={sessions} materials={materials} />
+          </TabsContent>
 
-        <TabsContent value="topics">
-          <div className="flex items-center justify-between mb-4">
-            <p className="text-sm text-muted-foreground">{topics.length} topics in this course</p>
-            <Button size="sm" variant="outline" onClick={() => setShowAddTopic(true)} className="gap-1.5">
-              <Plus className="w-3.5 h-3.5" /> Add Topic
-            </Button>
-          </div>
-          <TopicList topics={topics} course={course} onDelete={(topic) => handleDelete("Topic", topic, topic.title || "topic")} />
-        </TabsContent>
-
-        <TabsContent value="materials">
-          <MaterialsList materials={materials} onDelete={(material) => handleDelete("StudyMaterial", material, material.title || "material")} />
-        </TabsContent>
-
-        <TabsContent value="guides">
-          <GuidesList guides={guides} onDelete={(guide) => handleDelete("StudyGuide", guide, guide.title || "study guide")} />
-        </TabsContent>
-
-        <TabsContent value="mindmap">
-          <div className="bg-card border rounded-lg p-5 space-y-3">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-semibold">Mind map</h2>
-                <p className="text-sm text-muted-foreground">
-                  Open the course mind map to arrange topics visually, pan around large maps, and save a structured study overview.
-                </p>
-              </div>
-              <Button variant="outline" onClick={() => navigate(`/mindmap?course=${course.id}`)} className="gap-2">
-                <GitBranch className="w-4 h-4" /> Open mind map
+          <TabsContent value="topics">
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-sm text-muted-foreground">{topics.length} topics in this course</p>
+              <Button size="sm" variant="outline" onClick={() => setShowAddTopic(true)} className="gap-1.5">
+                <Plus className="w-3.5 h-3.5" /> Add Topic
               </Button>
             </div>
-            {guides.filter((guide) => guide.source === "mindmap").length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                This course does not have a saved mind map yet. Open the map and save it once you create one.
-              </p>
-            ) : (
-              <div className="grid sm:grid-cols-2 gap-3">
-                {guides.filter((guide) => guide.source === "mindmap").map((guide) => (
-                  <div key={guide.id} className="rounded-lg border bg-muted/20 p-3">
-                    <p className="text-sm font-medium">{guide.title}</p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {Array.isArray(guide.sections) ? `${guide.sections.length} nodes saved` : "Saved map"}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </TabsContent>
+            <TopicList topics={topics} course={course} onDelete={(topic) => handleDelete("Topic", topic, topic.title || "topic")} />
+          </TabsContent>
 
-        <TabsContent value="notes">
-          <NotesList notes={notes} onDelete={(note) => handleDelete("Note", note, note.title || "note")} />
-        </TabsContent>
-      </Tabs>
+          <TabsContent value="materials">
+            <MaterialsList materials={materials} onDelete={(material) => handleDelete("StudyMaterial", material, material.title || "material")} />
+          </TabsContent>
+
+          <TabsContent value="notes">
+            <NotesList notes={notes} onDelete={(note) => handleDelete("Note", note, note.title || "note")} />
+          </TabsContent>
+        </Tabs>
+      </div>
 
       <AddTopicDialog
         open={showAddTopic}
@@ -214,6 +180,7 @@ export default function CourseDetail() {
         topics={topics}
         onUploaded={loadData}
       />
+      </div>
     </div>
   );
 }
@@ -247,32 +214,6 @@ function MaterialsList({ materials, onDelete }) {
             </a>
           )}
           <DeleteButton onDelete={() => onDelete(m)} />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function GuidesList({ guides, onDelete }) {
-  if (guides.length === 0) {
-    return <Empty icon={BookOpen} text="No study guides generated yet. Start a study session to generate guides." />;
-  }
-  return (
-    <div className="grid sm:grid-cols-2 gap-3">
-      {guides.map(g => (
-        <div key={g.id} className="bg-card border rounded-lg p-4">
-          <div className="flex items-start gap-2">
-            <h3 className="font-medium text-sm flex-1">{g.title}</h3>
-            <DeleteButton onDelete={() => onDelete(g)} />
-          </div>
-          <p className="text-xs text-muted-foreground capitalize mt-1">{g.difficulty}</p>
-          {g.key_concepts?.length > 0 && (
-            <div className="flex flex-wrap gap-1 mt-2">
-              {g.key_concepts.slice(0, 3).map((c, i) => (
-                <span key={i} className="text-xs bg-muted px-2 py-0.5 rounded">{c}</span>
-              ))}
-            </div>
-          )}
         </div>
       ))}
     </div>

@@ -11,7 +11,6 @@ import Dashboard from './pages/Dashboard';
 import Courses from './pages/Courses';
 import CourseDetail from './pages/CourseDetail';
 import StudySessionPage from './pages/StudySession';
-import AITutor from './pages/AITutor';
 import Planner from './pages/Planner';
 import Progress from './pages/Progress';
 import Library from './pages/Library';
@@ -51,7 +50,6 @@ const AuthenticatedApp = () => {
         <Route path="/courses/:courseId" element={<CourseDetail />} />
         <Route path="/study" element={<StudySessionPage />} />
         <Route path="/study/:courseId/:topicId" element={<StudySessionPage />} />
-        <Route path="/ai-tutor" element={<AITutor />} />
         <Route path="/planner" element={<Planner />} />
         <Route path="/progress" element={<Progress />} />
         <Route path="/library" element={<Library />} />

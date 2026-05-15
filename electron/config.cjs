@@ -2,9 +2,16 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 
 const DEFAULT_CONFIG = {
+  setup: {
+    localAiChecked: false,
+    ollamaChecked: false,
+  },
   ai: {
     mode: "ask",
+    localBackend: "llama_cpp",
     localModelConsent: false,
+    ollamaUrl: "http://127.0.0.1:11434",
+    ollamaModel: "gemma4:e2b",
     cloudProvider: "google",
     agentProvider: "none",
     installedAgentProviders: {},

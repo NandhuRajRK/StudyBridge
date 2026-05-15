@@ -1,8 +1,25 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { DatabaseSync } = require("node:sqlite");
 const { pathToFileURL, fileURLToPath } = require("node:url");
+
+let DatabaseSync;
+let sqliteLoadError = null;
+try {
+  ({ DatabaseSync } = require("node:sqlite"));
+} catch (error) {
+  sqliteLoadError = error;
+}
+
+function ensureSqlite() {
+  if (DatabaseSync) return;
+  const error = new Error(
+    "node:sqlite is required for local storage but is not available in this runtime. " +
+      "Use the Windows Electron build that bundles Node 22+ with node:sqlite support.",
+  );
+  error.cause = sqliteLoadError;
+  throw error;
+}
 
 const ENTITY_TABLES = {
   Course: "courses",
@@ -66,6 +83,8 @@ function getUploadsDir(app) {
 
 function openDb(app) {
   if (dbCache) return dbCache;
+
+  ensureSqlite();
 
   const db = new DatabaseSync(getDbPath(app));
   db.exec(`

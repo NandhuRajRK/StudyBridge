@@ -100,8 +100,8 @@ const actionSchema = {
   },
 };
 
-function buildTutorOutputPrompt({ course, topic, context, depth, history, studentText, sourceIds }) {
-  return `${buildTutorPrompt({ course, topic, context, depth, history, studentText, sourceIds })}
+function buildTutorOutputPrompt({ course, topic, context, depth, history, studentText, sourceIds, sourceCatalog = [], studyMode = "explain" }) {
+  return `${buildTutorPrompt({ course, topic, context, depth, history, studentText, sourceIds, sourceCatalog, studyMode })}
 
 Return strictly valid JSON with:
 - reply: the final student-facing answer in concise markdown
@@ -253,10 +253,15 @@ function normalizeGrounding(grounding, allowedIds = []) {
     .slice(0, 6);
 }
 
-function formatGroundingFooter({ grounding = [], nextStep = "", missingContext = [] }) {
+function describeGroundingId(id, sourceCatalog = []) {
+  const source = sourceCatalog.find((item) => item.id === id);
+  return source ? `${id} (${source.label})` : id;
+}
+
+function formatGroundingFooter({ grounding = [], nextStep = "", missingContext = [], sourceCatalog = [] }) {
   const sections = [];
   if (grounding.length > 0) {
-    sections.push(`**Grounding**: ${grounding.join(", ")}`);
+    sections.push(`**Grounding**: ${grounding.map((id) => describeGroundingId(id, sourceCatalog)).join(", ")}`);
   }
   if (missingContext.length > 0) {
     sections.push(`**Missing context**: ${missingContext.join("; ")}`);
@@ -285,10 +290,10 @@ Current context:
 ${context}`;
 }
 
-function buildPendingApprovalReply({ course, actions, rawReply, grounding = [], nextStep = "", missingContext = [] }) {
+function buildPendingApprovalReply({ course, actions, rawReply, grounding = [], nextStep = "", missingContext = [], sourceCatalog = [] }) {
   const summary = actions.map((action) => `- ${action.type}: ${actionLabel(action)}`).join("\n");
   const heading = rawReply && !isLowQualityReply(rawReply) ? rawReply : `I’m ready to update ${course?.title || "StudyBridge"} but I need your approval first.`;
-  return `${heading}\n\n**Pending StudyBridge actions**\n${summary || "- None"}\n\nUse the approval controls below, or type "approve", to apply these changes.${formatGroundingFooter({ grounding, nextStep, missingContext })}`;
+  return `${heading}\n\n**Pending StudyBridge actions**\n${summary || "- None"}\n\nUse the approval controls below, or type "approve", to apply these changes.${formatGroundingFooter({ grounding, nextStep, missingContext, sourceCatalog })}`;
 }
 
 function extractListItems(text) {
@@ -304,7 +309,10 @@ function wantsExplicitTopicCreation(text) {
 }
 
 function wantsExplicitNoteCreation(text) {
-  return /\b(save|add|create|summari[sz]e|turn)\b/i.test(text) && /\b(note|notes)\b/i.test(text);
+  const raw = String(text || "");
+  const noteIntent = /\b(save|add|create|summari[sz]e|turn|capture|store)\b/i.test(raw) && /\b(note|notes)\b/i.test(raw);
+  const summaryAsNoteIntent = /\b(save|add|create|turn|capture|store)\b/i.test(raw) && /\b(summary|recap)\b/i.test(raw);
+  return noteIntent || summaryAsNoteIntent;
 }
 
 function wantsStudyBridgeAction(text) {
@@ -429,8 +437,8 @@ function normalizeMindMapNodes(action, course, topic) {
   return [normalizedRoot, ...children];
 }
 
-function buildAgentPrompt({ course, topic, context, depth, history, studentText, sourceIds = [] }) {
-  return `${buildTutorOutputPrompt({ course, topic, context, depth, history, studentText, sourceIds })}
+function buildAgentPrompt({ course, topic, context, depth, history, studentText, sourceIds = [], sourceCatalog = [], studyMode = "explain" }) {
+  return `${buildTutorOutputPrompt({ course, topic, context, depth, history, studentText, sourceIds, sourceCatalog, studyMode })}
 
 Action rules:
 - Only emit actions when the student clearly asks you to modify StudyBridge data.
@@ -499,7 +507,7 @@ function buildActionReply({ course, actionResults, rawReply }) {
   return `${rawReply}\n\n**StudyBridge actions**\n${summary}${detailsBlock}`;
 }
 
-async function runDeterministicActions({ course, topic, context, studentText, sessionId, sourceIds = [], approvalRequired = true }) {
+async function runDeterministicActions({ course, topic, context, studentText, sessionId, sourceIds = [], sourceCatalog = [], approvalRequired = true }) {
   if (!course?.id) return null;
   const grounding = normalizeGrounding(["course", "current-topic", "topics", "materials", "notes", "sessions", "tasks"], sourceIds);
 
@@ -518,6 +526,7 @@ async function runDeterministicActions({ course, topic, context, studentText, se
             rawReply: `I found ${actions.length} topic${actions.length === 1 ? "" : "s"} to add.`,
             grounding,
             nextStep: "Approve these changes to create the topics.",
+            sourceCatalog,
           }),
           pendingActions: actions,
           grounding,
@@ -534,14 +543,14 @@ async function runDeterministicActions({ course, topic, context, studentText, se
       const skipped = extractListItems(studentText).length - items.length;
       const skippedNotice = skipped > 0 ? `\nThe safety guard skipped ${skipped} extra item${skipped === 1 ? "" : "s"}. Send smaller batches if you want the rest.` : "";
       return {
-        reply: `I added those topics to ${course.title}.\n\n**StudyBridge actions**\n${actionResults.map((item) => `- ${item.ok ? "Done" : "Failed"}: ${item.message}`).join("\n")}${skippedNotice}${formatGroundingFooter({ grounding, nextStep: `Open ${course.title} and review the new topics.` })}`,
+        reply: `I added those topics to ${course.title}.\n\n**StudyBridge actions**\n${actionResults.map((item) => `- ${item.ok ? "Done" : "Failed"}: ${item.message}`).join("\n")}${skippedNotice}${formatGroundingFooter({ grounding, nextStep: `Open ${course.title} and review the new topics.`, sourceCatalog })}`,
         actionResults,
         grounding,
       };
     }
   }
 
-  if (wantsExplicitNoteCreation(studentText) && /this|chat|conversation|all of this|above/i.test(studentText)) {
+  if (wantsExplicitNoteCreation(studentText) && /this|chat|conversation|all of this|above|summary|recap/i.test(studentText)) {
     const action = {
       type: "create_note",
       title: `${topic?.title || course.title} AI notes`,
@@ -556,6 +565,7 @@ async function runDeterministicActions({ course, topic, context, studentText, se
           rawReply: "I can save the current context as a note.",
           grounding,
           nextStep: "Approve this change to save the note.",
+          sourceCatalog,
         }),
         pendingActions: [action],
         grounding,
@@ -566,7 +576,7 @@ async function runDeterministicActions({ course, topic, context, studentText, se
     }
     const actionResults = [await executeAction(action, { course, topic, sessionId })];
     return {
-      reply: `I saved the current StudyBridge context into a note.\n\n**StudyBridge actions**\n${actionResults.map((item) => `- ${item.ok ? "Done" : "Failed"}: ${item.message}`).join("\n")}${formatGroundingFooter({ grounding, nextStep: "Open Library to review the new note." })}`,
+      reply: `I saved the current StudyBridge context into a note.\n\n**StudyBridge actions**\n${actionResults.map((item) => `- ${item.ok ? "Done" : "Failed"}: ${item.message}`).join("\n")}${formatGroundingFooter({ grounding, nextStep: "Open Library to review the new note.", sourceCatalog })}`,
       actionResults,
       grounding,
     };
@@ -778,15 +788,16 @@ export async function executeStudyActions({ course, topic, sessionId, actions = 
   return actionResults;
 }
 
-export async function runStudyAgent({ course, topic, context, contextBundle, depth, history, studentText, sessionId, approvalRequired = true }) {
+export async function runStudyAgent({ course, topic, context, contextBundle, depth, history, studentText, sessionId, studyMode = "explain", approvalRequired = true }) {
   const groundedContext = contextBundle?.context || context || "";
   const sourceIds = contextBundle?.sourceIds || [];
+  const sourceCatalog = contextBundle?.sourceCatalog || [];
 
-  const deterministicResult = await runDeterministicActions({ course, topic, context: groundedContext, studentText, sessionId, sourceIds, approvalRequired });
-  if (deterministicResult) return deterministicResult;
+  const deterministicResult = await runDeterministicActions({ course, topic, context: groundedContext, studentText, sessionId, sourceIds, sourceCatalog, approvalRequired });
+  if (deterministicResult) return { ...deterministicResult, sourceCatalog };
 
   const result = await studybridge.integrations.Core.InvokeLLM({
-    prompt: buildAgentPrompt({ course, topic, context: groundedContext, depth, history, studentText, sourceIds }),
+    prompt: buildAgentPrompt({ course, topic, context: groundedContext, depth, history, studentText, sourceIds, sourceCatalog, studyMode }),
     response_json_schema: actionSchema,
   });
 
@@ -811,6 +822,7 @@ export async function runStudyAgent({ course, topic, context, contextBundle, dep
         grounding,
         nextStep: nextStep || "Approve these changes to continue.",
         missingContext,
+        sourceCatalog,
       }),
       grounding,
       nextStep,
@@ -818,6 +830,7 @@ export async function runStudyAgent({ course, topic, context, contextBundle, dep
       actionResults: [],
       pendingActions,
       approvalRequired: true,
+      sourceCatalog,
     };
   }
 
@@ -837,25 +850,28 @@ export async function runStudyAgent({ course, topic, context, contextBundle, dep
 
   if (actionResults.length === 0) {
     return {
-      reply: `${rawReply}${skippedActions > 0 ? `\n\nStudyBridge safety skipped ${skippedActions} extra action${skippedActions === 1 ? "" : "s"}.` : ""}${formatGroundingFooter({ grounding, nextStep, missingContext })}`,
+      reply: `${rawReply}${skippedActions > 0 ? `\n\nStudyBridge safety skipped ${skippedActions} extra action${skippedActions === 1 ? "" : "s"}.` : ""}${formatGroundingFooter({ grounding, nextStep, missingContext, sourceCatalog })}`,
       grounding,
       nextStep,
       missingContext,
       actionResults,
+      sourceCatalog,
     };
   }
 
   return {
-    reply: `${buildActionReply({ course, actionResults, rawReply })}${skippedActions > 0 ? `\n\nStudyBridge safety skipped ${skippedActions} extra action${skippedActions === 1 ? "" : "s"}.` : ""}${formatGroundingFooter({ grounding, nextStep, missingContext })}`,
+    reply: `${buildActionReply({ course, actionResults, rawReply })}${skippedActions > 0 ? `\n\nStudyBridge safety skipped ${skippedActions} extra action${skippedActions === 1 ? "" : "s"}.` : ""}${formatGroundingFooter({ grounding, nextStep, missingContext, sourceCatalog })}`,
     grounding,
     nextStep,
     missingContext,
     actionResults,
+    sourceCatalog,
   };
 }
 
 export async function runStudyTurn(args) {
-  const contextBundle = args.contextBundle || { context: args.context || "", sourceIds: [] };
+  const contextBundle = args.contextBundle || { context: args.context || "", sourceIds: [], sourceCatalog: [] };
+  const sourceCatalog = contextBundle?.sourceCatalog || [];
 
   if (wantsStudyBridgeAction(args.studentText)) {
     // Deterministic intent routing keeps obvious "save/add/create" requests from relying on the model.
@@ -863,7 +879,7 @@ export async function runStudyTurn(args) {
   }
 
   const result = await studybridge.integrations.Core.InvokeLLM({
-    prompt: buildTutorOutputPrompt({ ...args, context: contextBundle.context, sourceIds: contextBundle.sourceIds }),
+    prompt: buildTutorOutputPrompt({ ...args, context: contextBundle.context, sourceIds: contextBundle.sourceIds, sourceCatalog, studyMode: args.studyMode }),
     response_json_schema: tutorSchema,
   });
 
@@ -875,11 +891,12 @@ export async function runStudyTurn(args) {
   const missingContext = normalizeArray(result?.missing_context).map((item) => String(item).trim()).filter(Boolean);
 
   return {
-    reply: `${isLowQualityReply(reply) ? buildFallbackReply({ ...args, context: contextBundle.context }) : reply}${formatGroundingFooter({ grounding, nextStep, missingContext })}`,
+    reply: `${isLowQualityReply(reply) ? buildFallbackReply({ ...args, context: contextBundle.context }) : reply}${formatGroundingFooter({ grounding, nextStep, missingContext, sourceCatalog })}`,
     grounding,
     nextStep,
     missingContext,
     actionResults: [],
     pendingActions: [],
+    sourceCatalog,
   };
 }

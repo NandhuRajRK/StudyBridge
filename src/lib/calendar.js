@@ -79,6 +79,18 @@ export function buildGoogleCalendarUrl({ title, details, dateKey, nextDateKey })
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
 }
 
+export function buildOutlookCalendarUrl({ title, details, dateKey }) {
+  if (!dateKey) return "";
+  const params = new URLSearchParams();
+  params.set("path", "/calendar/action/compose");
+  params.set("rru", "addevent");
+  params.set("subject", title);
+  params.set("body", details);
+  params.set("startdt", `${dateKey}T09:00:00`);
+  params.set("enddt", `${dateKey}T09:30:00`);
+  return `https://outlook.office.com/calendar/0/deeplink/compose?${params.toString()}`;
+}
+
 function buildIcsEvent({ title, details, dateKey, nextDateKey }) {
   if (!dateKey) return "";
   const compactDate = dateKey.replace(/-/g, "");
@@ -132,6 +144,13 @@ export function downloadTextFile(filename, text, mimeType = "text/plain;charset=
 export function openGoogleCalendarTask(task, course, topic, fallbackDate = null) {
   const meta = buildTaskCalendarMeta(task, course, topic, fallbackDate);
   const url = buildGoogleCalendarUrl(meta);
+  if (!url) return;
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+export function openOutlookCalendarTask(task, course, topic, fallbackDate = null) {
+  const meta = buildTaskCalendarMeta(task, course, topic, fallbackDate);
+  const url = buildOutlookCalendarUrl(meta);
   if (!url) return;
   window.open(url, "_blank", "noopener,noreferrer");
 }

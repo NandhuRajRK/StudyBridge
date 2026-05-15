@@ -4,10 +4,13 @@ import { Link } from "react-router-dom";
 import { Progress as ProgressBar } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { TrendingUp, Clock, Brain, Target, AlertTriangle, ArrowRight } from "lucide-react";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { TrendingUp, Clock, Brain, Target, AlertTriangle, ArrowRight, HelpCircle, Pencil } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, CartesianGrid } from "recharts";
-import { formatDistanceToNow, subDays } from "date-fns";
+import { formatDistanceToNow } from "date-fns";
+import { getAverageMastery, getCourseProgressData, getMasteryDistribution, getStrongTopics, getWeeklyStudyStats, getWeakTopics, sumSessionMinutes } from "@/lib/studyStats";
 import { useLocale } from "@/lib/locale";
+import { Tooltip as HoverTooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 const COLORS = ["#3B5BDB", "#1098AD", "#37B24D", "#F59F00", "#E64980", "#7950F2"];
 
@@ -42,61 +45,50 @@ export default function Progress() {
     );
   }
 
-  const now = new Date();
-  const weekStart = subDays(now, 6);
-  const weeklySessions = sessions.filter(session => session.created_date && new Date(session.created_date) >= weekStart);
-  const weeklyStudyTime = weeklySessions.reduce((sum, session) => sum + (session.duration_minutes || 0), 0);
-  const totalStudyTime = sessions.reduce((sum, session) => sum + (session.duration_minutes || 0), 0);
+  const totalStudyTime = sumSessionMinutes(sessions);
   const totalSessions = sessions.length;
-  const avgMastery = topics.length > 0 ? Math.round(topics.reduce((sum, topic) => sum + (topic.mastery_level || 0), 0) / topics.length) : 0;
-  const weakTopics = topics.filter(topic => topic.mastery_level > 0 && topic.mastery_level < 40);
-  const strongTopics = topics.filter(topic => topic.mastery_level >= 70);
+  const avgMastery = getAverageMastery(topics);
+  const weakTopics = getWeakTopics(topics);
+  const strongTopics = getStrongTopics(topics);
   const dailyGoal = profile?.daily_goal_minutes || 60;
-  const weeklyGoal = dailyGoal * 7;
-  const weeklyGoalPct = weeklyGoal > 0 ? Math.min(100, Math.round((weeklyStudyTime / weeklyGoal) * 100)) : 0;
-  const goalMinutesLeft = Math.max(0, weeklyGoal - weeklyStudyTime);
-  const paceLabel = weeklyStudyTime >= weeklyGoal
-    ? "On track for the week"
-    : `${goalMinutesLeft}m left to hit your weekly goal`;
-
-  const courseProgressData = courses.map(course => ({
-    name: course.code || course.title?.substring(0, 8) || "Course",
-    progress: course.overall_progress || 0,
-    color: course.color || "#3B5BDB",
-  }));
-
-  const masteryDist = [
-    { name: "Not Started", value: topics.filter(topic => topic.mastery_level === 0).length, color: "#94A3B8" },
-    { name: "Weak (<40%)", value: topics.filter(topic => topic.mastery_level > 0 && topic.mastery_level < 40).length, color: "#EF4444" },
-    { name: "Learning (40-69%)", value: topics.filter(topic => topic.mastery_level >= 40 && topic.mastery_level < 70).length, color: "#F59F00" },
-    { name: "Strong (>=70%)", value: topics.filter(topic => topic.mastery_level >= 70).length, color: "#37B24D" },
-  ].filter(entry => entry.value > 0);
+  const {
+    weeklySessions,
+    weeklyStudyTime,
+    weeklyGoal,
+    weeklyGoalPct,
+    paceLabel,
+  } = getWeeklyStudyStats(sessions, dailyGoal);
+  const courseProgressData = getCourseProgressData(courses);
+  const masteryDist = getMasteryDistribution(topics);
 
   return (
-    <div className="p-6 lg:p-8 max-w-6xl mx-auto space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">{t("nav.progress")}</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            {profile?.full_name || "Student"} - {profile?.major || "no major set"} - {dailyGoal} min/day goal
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button asChild variant="outline" className="gap-2">
-            <Link to="/planner">{t("study.openPlanner")} <ArrowRight className="w-4 h-4" /></Link>
-          </Button>
-          <Button asChild className="gap-2">
-            <Link to="/study">{t("study.startStudying")} <Brain className="w-4 h-4" /></Link>
-          </Button>
-        </div>
-      </div>
+    <TooltipProvider delayDuration={120}>
+      <div className="h-full overflow-hidden bg-background">
+        <div className="flex h-full min-h-0 w-full flex-col gap-6 p-6 lg:p-8">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h1 className="text-2xl font-semibold">{t("nav.progress")}</h1>
+              <p className="text-sm text-muted-foreground mt-1">
+                {profile?.full_name || "Student"} - {profile?.major || "no major set"} - {dailyGoal} min/day goal
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button asChild variant="outline" className="gap-2">
+                <Link to="/planner">{t("study.openPlanner")} <ArrowRight className="w-4 h-4" /></Link>
+              </Button>
+              <Button asChild className="gap-2">
+                <Link to="/study">{t("study.startStudying")} <Brain className="w-4 h-4" /></Link>
+              </Button>
+            </div>
+          </div>
 
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1 space-y-6">
       <section className="grid gap-4 lg:grid-cols-[1.3fr_.9fr]">
         <div className="bg-card border rounded-lg p-5 space-y-4">
           <div className="flex items-center justify-between gap-3">
-            <div>
+            <div className="flex items-center gap-2">
               <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">{t("study.weeklyGoal")}</h2>
-              <p className="text-sm text-muted-foreground mt-1">Progress is anchored to your daily goal and last 7 days of study time.</p>
+              <HelpTip>Progress is anchored to your daily goal and last 7 days of study time.</HelpTip>
             </div>
             <span className="text-sm font-medium">{paceLabel}</span>
           </div>
@@ -131,10 +123,18 @@ export default function Progress() {
         </div>
 
         <div className="bg-card border rounded-lg p-5 space-y-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">{t("study.profileContext")}</h2>
-          <p className="text-sm text-muted-foreground">
-            The AI and planner now use this profile context when they build study plans or summaries.
-          </p>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">{t("study.profileContext")}</h2>
+              <HelpTip>The AI and planner use this profile context when they build study plans or summaries.</HelpTip>
+            </div>
+            <Button asChild variant="outline" size="sm" className="gap-2">
+              <Link to="/settings#profile">
+                <Pencil className="w-3.5 h-3.5" />
+                Edit profile
+              </Link>
+            </Button>
+          </div>
           <div className="space-y-2 text-sm">
             <ContextRow label="University" value={profile?.university || "Not set"} />
             <ContextRow label="Major" value={profile?.major || "Not set"} />
@@ -260,30 +260,47 @@ export default function Progress() {
         </TabsContent>
 
         <TabsContent value="sessions" className="mt-4">
-          <div className="bg-card border rounded-lg divide-y">
+          <div className="bg-card border rounded-lg overflow-hidden">
             {sessions.length === 0 ? (
               <p className="p-6 text-center text-sm text-muted-foreground">No study sessions yet</p>
             ) : (
-              sessions.map(session => (
-                <div key={session.id} className="p-3 flex items-center gap-3">
-                  <Brain className="w-4 h-4 text-primary shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium">{session.topic_title}</p>
-                    <p className="text-xs text-muted-foreground">{session.course_title}</p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p className="text-sm">{session.duration_minutes || 0}m</p>
-                    <p className="text-xs text-muted-foreground">
-                      {session.confidence_before && session.confidence_after && (
-                        <span>Confidence: {session.confidence_before}→{session.confidence_after}</span>
-                      )}
-                    </p>
-                  </div>
-                  <span className="text-xs text-muted-foreground shrink-0">
-                    {session.created_date ? formatDistanceToNow(new Date(session.created_date), { addSuffix: true }) : ""}
-                  </span>
-                </div>
-              ))
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Topic</TableHead>
+                    <TableHead>Course</TableHead>
+                    <TableHead>Duration</TableHead>
+                    <TableHead>Confidence before/after</TableHead>
+                    <TableHead>Date</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {sessions.map((session) => (
+                    <TableRow key={session.id}>
+                      <TableCell className="font-medium">{session.topic_title || "Untitled topic"}</TableCell>
+                      <TableCell>{session.course_title || "No course"}</TableCell>
+                      <TableCell>{session.duration_minutes || 0}m</TableCell>
+                      <TableCell>
+                        {session.confidence_before != null || session.confidence_after != null
+                          ? `${session.confidence_before ?? "—"} → ${session.confidence_after ?? "—"}`
+                          : "—"}
+                      </TableCell>
+                      <TableCell>
+                        {session.created_date ? (
+                          <div className="text-sm">
+                            <p>{new Date(session.created_date).toLocaleDateString()}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {formatDistanceToNow(new Date(session.created_date), { addSuffix: true })}
+                            </p>
+                          </div>
+                        ) : (
+                          "—"
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             )}
           </div>
         </TabsContent>
@@ -314,7 +331,10 @@ export default function Progress() {
           )}
         </TabsContent>
       </Tabs>
-    </div>
+          </div>
+        </div>
+      </div>
+    </TooltipProvider>
   );
 }
 
@@ -336,5 +356,24 @@ function ContextRow({ label, value }) {
       <span className="text-xs text-muted-foreground">{label}</span>
       <span className="text-sm font-medium text-right">{value}</span>
     </div>
+  );
+}
+
+function HelpTip({ children }) {
+  return (
+    <HoverTooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-border/60 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          aria-label="More information"
+        >
+          <HelpCircle className="h-3.5 w-3.5" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs text-center leading-relaxed">
+        {children}
+      </TooltipContent>
+    </HoverTooltip>
   );
 }

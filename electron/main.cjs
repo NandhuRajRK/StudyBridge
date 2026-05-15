@@ -4,7 +4,7 @@ const fs = require("node:fs/promises");
 const fsSync = require("node:fs");
 const os = require("node:os");
 const { spawn } = require("node:child_process");
-const { startLocalAi, getHardwarePreset } = require("./local-ai.cjs");
+const { startLocalAi, getHardwarePreset, getCachedLlamaBinary } = require("./local-ai.cjs");
 const { DEFAULT_CONFIG, readConfig, writeConfig, mergeConfig } = require("./config.cjs");
 const {
   listRows,
@@ -32,6 +32,207 @@ let localAiRuntime = {
 };
 let localAiPromise = null;
 let codexLastRequestAt = 0;
+const LOG_FILE_NAME = "studybridge-main.log";
+const OLLAMA_INSTALL_ID = "Ollama.Ollama";
+const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
+const DEFAULT_OLLAMA_MODEL = "gemma4:e2b";
+
+function normalizeOllamaUrl(url) {
+  const trimmed = String(url || "").trim();
+  if (!trimmed) return DEFAULT_OLLAMA_URL;
+  const candidate = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+  try {
+    const parsed = new URL(candidate);
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return DEFAULT_OLLAMA_URL;
+  }
+}
+
+function getOllamaHostEnv(url) {
+  const normalized = normalizeOllamaUrl(url);
+  try {
+    const parsed = new URL(normalized);
+    return parsed.host || "127.0.0.1:11434";
+  } catch {
+    return "127.0.0.1:11434";
+  }
+}
+
+async function isLocalAiServerReady(url) {
+  if (!url) return false;
+  try {
+    const response = await fetch(`${url}/v1/models`);
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+function getLocalBackendConfig() {
+  const ai = appConfig.ai || {};
+  return {
+    localBackend: ai.localBackend || "llama_cpp",
+    ollamaUrl: normalizeOllamaUrl(ai.ollamaUrl),
+    ollamaModel: ai.ollamaModel || DEFAULT_OLLAMA_MODEL,
+  };
+}
+
+function getLocalSetupFlag(localBackend) {
+  return localBackend === "ollama" ? "ollamaChecked" : "localAiChecked";
+}
+
+async function isOllamaServerReady(url) {
+  if (!url) return false;
+  try {
+    const response = await fetch(`${url}/api/tags`);
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function listOllamaModels(url) {
+  if (!url) return [];
+  try {
+    const response = await fetch(`${url}/api/tags`);
+    if (!response.ok) return [];
+    const data = await response.json();
+    return Array.isArray(data?.models) ? data.models : [];
+  } catch {
+    return [];
+  }
+}
+
+async function hasOllamaModel(url, modelName) {
+  const models = await listOllamaModels(url);
+  const target = String(modelName || "").toLowerCase();
+  return models.some((model) => String(model?.name || "").toLowerCase() === target);
+}
+
+function waitForOllamaRuntime(url, modelName, timeoutMs = 20 * 60 * 1000) {
+  const deadline = Date.now() + timeoutMs;
+
+  return new Promise((resolve, reject) => {
+    const tick = async () => {
+      if (Date.now() > deadline) {
+        reject(new Error("Timed out waiting for Ollama to start"));
+        return;
+      }
+
+      try {
+        const serverReady = await isOllamaServerReady(url);
+        if (serverReady && (!modelName || await hasOllamaModel(url, modelName))) {
+          resolve();
+          return;
+        }
+      } catch {
+        // keep waiting
+      }
+
+      setTimeout(tick, 3000);
+    };
+
+    tick();
+  });
+}
+
+async function resolveOllamaCommand() {
+  try {
+    await runBufferedCommand("ollama", ["--version"], { timeoutMs: 15000 });
+    return { ok: true, command: "ollama" };
+  } catch (error) {
+    return { ok: false, command: "ollama", error: error?.message || String(error) };
+  }
+}
+
+async function resolveWingetCommand() {
+  try {
+    await runBufferedCommand("winget", ["--version"], { timeoutMs: 15000 });
+    return { ok: true, command: "winget" };
+  } catch (error) {
+    return { ok: false, command: "winget", error: error?.message || String(error) };
+  }
+}
+
+function startOllamaServer(command = "ollama", url = DEFAULT_OLLAMA_URL) {
+  const ollamaHost = getOllamaHostEnv(url);
+  const child = spawn(command, ["serve"], {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+    env: spawnEnv({ OLLAMA_HOST: ollamaHost }),
+  });
+  child.unref();
+  return child;
+}
+
+function startOllamaPull(command, modelName, url = DEFAULT_OLLAMA_URL) {
+  const ollamaHost = getOllamaHostEnv(url);
+  const child = spawn(command, ["pull", modelName], {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+    env: spawnEnv({ OLLAMA_HOST: ollamaHost }),
+  });
+  child.unref();
+  return child;
+}
+
+async function installOllamaWithWinget() {
+  const winget = await resolveWingetCommand();
+  if (!winget.ok) return { ok: false, error: winget.error || "winget not available" };
+  try {
+    await runBufferedCommand(winget.command, [
+      "install",
+      "--id",
+      OLLAMA_INSTALL_ID,
+      "-e",
+      "--accept-package-agreements",
+      "--accept-source-agreements",
+    ], { timeoutMs: 20 * 60 * 1000 });
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) };
+  }
+}
+
+function formatLogDetails(details) {
+  if (!details) return "";
+  if (details instanceof Error) return details.stack || details.message;
+  try {
+    return JSON.stringify(details);
+  } catch {
+    return String(details);
+  }
+}
+
+function getLogPath() {
+  try {
+    const baseDir = app.getPath("userData");
+    return path.join(baseDir, LOG_FILE_NAME);
+  } catch {
+    return path.join(process.cwd(), LOG_FILE_NAME);
+  }
+}
+
+function logEvent(level, message, details) {
+  const suffix = details ? ` ${formatLogDetails(details)}` : "";
+  const line = `[${new Date().toISOString()}] [${level}] ${message}${suffix}\n`;
+  try {
+    fsSync.appendFileSync(getLogPath(), line, "utf8");
+  } catch {
+    // ignore logging failures
+  }
+}
+
+process.on("uncaughtException", (error) => {
+  logEvent("error", "uncaughtException", error);
+});
+
+process.on("unhandledRejection", (reason) => {
+  logEvent("error", "unhandledRejection", reason);
+});
 
 function spawnEnv(extraEnv = {}) {
   const nextEnv = {
@@ -354,6 +555,29 @@ function getCloudBudgetState() {
   };
 }
 
+function buildSchemaHint(schema) {
+  if (!schema) return "";
+  return `\n\nReturn ONLY valid JSON. Match this schema as closely as possible:\n${JSON.stringify(schema, null, 2)}`;
+}
+
+function extractJson(text) {
+  if (typeof text !== "string") return text;
+  const trimmed = text.trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    const start = trimmed.indexOf("{");
+    const end = trimmed.lastIndexOf("}");
+    if (start === -1 || end === -1 || end <= start) return text;
+
+    try {
+      return JSON.parse(trimmed.slice(start, end + 1));
+    } catch {
+      return text;
+    }
+  }
+}
+
 function getSafetyGuardState() {
   const aiConfig = appConfig.ai || {};
   const safety = normalizeSafetyLimits(aiConfig);
@@ -391,6 +615,9 @@ function getSafeAiSettings() {
 
   return {
     ...rest,
+    localBackend: ai.localBackend || "llama_cpp",
+    ollamaUrl: normalizeOllamaUrl(ai.ollamaUrl),
+    ollamaModel: ai.ollamaModel || DEFAULT_OLLAMA_MODEL,
     hasGoogleApiKey: Boolean(ai.googleApiKey),
     hasOpenAiApiKey: Boolean(ai.openAiApiKey),
     hasAnthropicApiKey: Boolean(ai.anthropicApiKey),
@@ -408,6 +635,7 @@ function getSafeAiSettings() {
 }
 
 function createWindow() {
+  logEvent("info", "createWindow");
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 960,
@@ -432,6 +660,23 @@ function createWindow() {
     return { action: "deny" };
   });
 
+  mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    logEvent("error", "did-fail-load", {
+      errorCode,
+      errorDescription,
+      validatedURL,
+      isMainFrame,
+    });
+  });
+
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    logEvent("error", "render-process-gone", details);
+  });
+
+  mainWindow.on("unresponsive", () => {
+    logEvent("warn", "window-unresponsive");
+  });
+
   mainWindow.webContents.on("will-navigate", (event, url) => {
     if (/^(https?:|mailto:|tel:)/i.test(url)) {
       event.preventDefault();
@@ -445,14 +690,17 @@ function createWindow() {
   mainWindow.setMenu(null);
 
   if (devServerUrl) {
-    mainWindow.loadURL(devServerUrl);
+    logEvent("info", "loadURL", { url: devServerUrl });
+    mainWindow.loadURL(devServerUrl).catch((error) => logEvent("error", "loadURL failed", error));
     mainWindow.webContents.openDevTools({ mode: "detach" });
   } else {
     const indexPath = path.join(app.getAppPath(), "dist", "index.html");
-    mainWindow.loadFile(indexPath);
+    logEvent("info", "loadFile", { indexPath });
+    mainWindow.loadFile(indexPath).catch((error) => logEvent("error", "loadFile failed", error));
   }
 
   mainWindow.on("closed", () => {
+    logEvent("info", "window-closed");
     mainWindow = null;
   });
 }
@@ -461,10 +709,14 @@ function runtimeForRenderer() {
   const budget = getCloudBudgetState();
   const safetyLimits = normalizeSafetyLimits(appConfig.ai || {});
   const cloudProvider = appConfig.ai?.cloudProvider || "google";
+  const backendConfig = getLocalBackendConfig();
   return {
     ...localAiRuntime,
     aiMode: appConfig.ai?.mode || "disabled",
     localModelConsent: Boolean(appConfig.ai?.localModelConsent),
+    localBackend: backendConfig.localBackend,
+    ollamaUrl: backendConfig.ollamaUrl,
+    ollamaModel: backendConfig.ollamaModel,
     cloudProvider,
     cloudModel: getCloudProviderModel(appConfig.ai || {}, cloudProvider),
     googleModel: appConfig.ai?.googleModel || "gemini-2.5-flash",
@@ -520,36 +772,254 @@ async function syncRuntimeFromConfig() {
     return localAiRuntime;
   }
 
-  if (mode === "local" && appConfig.ai?.localModelConsent) {
-    stopLocalRuntime();
-    localAiRuntime = {
-      ...localAiRuntime,
-      mode: "local",
-      status: "downloading-model",
-      error: null,
-    };
+  if (mode === "local") {
+    const { localBackend, ollamaUrl, ollamaModel } = getLocalBackendConfig();
+    const currentProvider = localAiRuntime?.provider;
+    const isBusy = ["starting", "downloading-model"].includes(localAiRuntime?.status);
 
-    localAiPromise = startLocalAi(app)
-      .then((runtime) => {
+    if (currentProvider && currentProvider !== localBackend) {
+      stopLocalRuntime();
+    }
+
+    if (localBackend === "ollama") {
+      if (currentProvider === "ollama" && isBusy && localAiPromise) {
+        return localAiRuntime;
+      }
+
+      const serverReady = await isOllamaServerReady(ollamaUrl);
+      if (serverReady) {
+        const modelReady = await hasOllamaModel(ollamaUrl, ollamaModel);
+        if (!modelReady) {
+          if (appConfig.ai?.localModelConsent) {
+            const status = await resolveOllamaCommand();
+            if (status.ok) {
+              logEvent("info", "ollama-pull-start", { model: ollamaModel, url: ollamaUrl });
+              startOllamaPull(status.command, ollamaModel, ollamaUrl);
+              localAiRuntime = {
+                ...getHardwarePreset(),
+                mode: "local",
+                provider: "ollama",
+                status: "downloading-model",
+                error: null,
+                url: ollamaUrl,
+                model: ollamaModel,
+              };
+              localAiPromise = waitForOllamaRuntime(ollamaUrl, ollamaModel)
+                .then(() => {
+                  localAiRuntime = {
+                    ...getHardwarePreset(),
+                    mode: "local",
+                    provider: "ollama",
+                    status: "ready",
+                    error: null,
+                    url: ollamaUrl,
+                    model: ollamaModel,
+                  };
+                  return localAiRuntime;
+                })
+                .catch((error) => {
+                  localAiRuntime = {
+                    ...getHardwarePreset(),
+                    mode: "local",
+                    provider: "ollama",
+                    status: "error",
+                    error: error.message || String(error),
+                    url: ollamaUrl,
+                    model: ollamaModel,
+                  };
+                  return localAiRuntime;
+                });
+              return localAiRuntime;
+            }
+          }
+
+          localAiPromise = null;
+          localAiRuntime = {
+            ...getHardwarePreset(),
+            mode: "local",
+            provider: "ollama",
+            status: "missing_model",
+            error: `Ollama model ${ollamaModel} is not available.`,
+            url: ollamaUrl,
+            model: ollamaModel,
+          };
+          logEvent("warn", "ollama-model-missing", { url: ollamaUrl, model: ollamaModel });
+          return localAiRuntime;
+        }
+
+        localAiPromise = null;
         localAiRuntime = {
-          ...runtime,
+          ...getHardwarePreset(),
           mode: "local",
-          status: runtime.status || "ready",
+          provider: "ollama",
+          status: "ready",
           error: null,
+          url: ollamaUrl,
+          model: ollamaModel,
         };
+        logEvent("info", "ollama-runtime-ready", { url: ollamaUrl, model: ollamaModel });
         return localAiRuntime;
-      })
-      .catch((error) => {
-        localAiRuntime = {
-          ...localAiRuntime,
-          mode: "local",
-          status: "error",
-          error: error.message || String(error),
-        };
-        return localAiRuntime;
-      });
+      }
 
-    return localAiPromise;
+      if (appConfig.ai?.localModelConsent) {
+        const status = await resolveOllamaCommand();
+        if (status.ok) {
+          logEvent("info", "ollama-serve-start", { url: ollamaUrl, model: ollamaModel });
+          startOllamaServer(status.command, ollamaUrl);
+          localAiRuntime = {
+            ...getHardwarePreset(),
+            mode: "local",
+            provider: "ollama",
+            status: "starting",
+            error: null,
+            url: ollamaUrl,
+            model: ollamaModel,
+          };
+          localAiPromise = waitForOllamaRuntime(ollamaUrl)
+            .then(async () => {
+              const modelReady = await hasOllamaModel(ollamaUrl, ollamaModel);
+              if (modelReady) {
+                return;
+              }
+              logEvent("info", "ollama-pull-start", { model: ollamaModel, url: ollamaUrl });
+              startOllamaPull(status.command, ollamaModel, ollamaUrl);
+              localAiRuntime = {
+                ...getHardwarePreset(),
+                mode: "local",
+                provider: "ollama",
+                status: "downloading-model",
+                error: null,
+                url: ollamaUrl,
+                model: ollamaModel,
+              };
+              await waitForOllamaRuntime(ollamaUrl, ollamaModel);
+            })
+            .then(() => {
+              localAiRuntime = {
+                ...getHardwarePreset(),
+                mode: "local",
+                provider: "ollama",
+                status: "ready",
+                error: null,
+                url: ollamaUrl,
+                model: ollamaModel,
+              };
+              return localAiRuntime;
+            })
+            .catch((error) => {
+              localAiRuntime = {
+                ...getHardwarePreset(),
+                mode: "local",
+                provider: "ollama",
+                status: "error",
+                error: error.message || String(error),
+                url: ollamaUrl,
+                model: ollamaModel,
+              };
+              return localAiRuntime;
+            });
+          return localAiRuntime;
+        }
+      }
+
+      localAiPromise = null;
+      localAiRuntime = {
+        ...getHardwarePreset(),
+        mode: "local",
+        provider: "ollama",
+        status: "missing_provider",
+        error: "Ollama is not installed or running.",
+        url: ollamaUrl,
+        model: ollamaModel,
+      };
+      logEvent("warn", "ollama-missing-provider", { url: ollamaUrl, model: ollamaModel });
+      return localAiRuntime;
+    }
+
+    const localUrl = currentProvider === "llama_cpp" && localAiRuntime.url
+      ? localAiRuntime.url
+      : "http://127.0.0.1:8080";
+    const localModel = currentProvider === "llama_cpp" && localAiRuntime.model
+      ? localAiRuntime.model
+      : `${getHardwarePreset().repo}:${getHardwarePreset().quant}`;
+    if (currentProvider === "llama_cpp" && isBusy && localAiPromise) {
+      return localAiRuntime;
+    }
+
+    const serverReady = await isLocalAiServerReady(localUrl);
+    if (serverReady) {
+      localAiPromise = null;
+      localAiRuntime = {
+        ...getHardwarePreset(),
+        mode: "local",
+        provider: "llama_cpp",
+        status: "ready",
+        error: null,
+        url: localUrl,
+        model: localModel,
+      };
+      logEvent("info", "local-runtime-ready", {
+        provider: "llama_cpp",
+        url: localUrl,
+        model: localModel,
+      });
+      return localAiRuntime;
+    }
+
+    if (appConfig.ai?.localModelConsent) {
+      localAiRuntime = {
+        ...localAiRuntime,
+        mode: "local",
+        provider: "llama_cpp",
+        status: "downloading-model",
+        error: null,
+        url: localUrl,
+        model: localModel,
+      };
+
+      localAiPromise = startLocalAi(app)
+        .then((runtime) => {
+          localAiRuntime = {
+            ...runtime,
+            mode: "local",
+            provider: "llama_cpp",
+            status: runtime.status || "ready",
+            error: null,
+          };
+          logEvent("info", "local-runtime-ready", {
+            provider: "llama_cpp",
+            url: runtime.url,
+            model: runtime.model,
+          });
+          return localAiRuntime;
+        })
+        .catch((error) => {
+          localAiRuntime = {
+            ...localAiRuntime,
+            mode: "local",
+            provider: "llama_cpp",
+            status: "error",
+            error: error.message || String(error),
+          };
+          logEvent("error", "local-runtime-failed", error);
+          return localAiRuntime;
+        });
+
+      return localAiPromise;
+    }
+
+    localAiPromise = null;
+    localAiRuntime = {
+      ...getHardwarePreset(),
+      mode: "local",
+      provider: "llama_cpp",
+      status: "disabled",
+      error: "Local AI requires consent to download and install the Gemma runtime.",
+      url: localUrl,
+      model: `${getHardwarePreset().repo}:${getHardwarePreset().quant}`,
+    };
+    logEvent("warn", "local-runtime-disabled", { url: localUrl });
+    return localAiRuntime;
   }
 
   stopLocalRuntime();
@@ -593,27 +1063,57 @@ async function syncRuntimeFromConfig() {
   return localAiRuntime;
 }
 
-async function promptForAiSetup() {
-  const response = await dialog.showMessageBox({
+async function promptForAiSetup(parentWindow) {
+  const options = {
     type: "question",
     buttons: [
       "Use Codex CLI",
+      "Use Ollama",
       "Download local Gemma model",
       "Not now",
     ],
     defaultId: 0,
-    cancelId: 2,
+    cancelId: 3,
     title: "StudyBridge AI setup",
     message: "Choose how you want AI to work in StudyBridge.",
-    detail: "Codex CLI uses your local Codex login and does not store an OpenAI API key in this app. Local Gemma remains available for offline use.",
+    detail: "Codex CLI uses your local Codex login and does not store an OpenAI API key in this app. Ollama uses your local Ollama install. Local Gemma remains available for offline use.",
     noLink: true,
-  });
+  };
+
+  const response = parentWindow
+    ? await dialog.showMessageBox(parentWindow, options)
+    : await dialog.showMessageBox(options);
 
   return response.response;
 }
 
-async function initializeAiMode() {
+async function initializeAiMode(parentWindow) {
   appConfig = await readConfig(app);
+  let shouldPersist = false;
+
+  if (!appConfig.ai) {
+    appConfig.ai = {};
+    shouldPersist = true;
+  }
+
+  const normalizedOllamaUrl = normalizeOllamaUrl(appConfig.ai.ollamaUrl);
+  if (appConfig.ai.ollamaUrl !== normalizedOllamaUrl) {
+    appConfig.ai.ollamaUrl = normalizedOllamaUrl;
+    shouldPersist = true;
+  }
+  if (!appConfig.ai.ollamaModel) {
+    appConfig.ai.ollamaModel = DEFAULT_OLLAMA_MODEL;
+    shouldPersist = true;
+  }
+  if (appConfig.ai.mode === "local" && !appConfig.ai.localModelConsent) {
+    appConfig.ai.localModelConsent = true;
+    shouldPersist = true;
+  }
+
+  if (shouldPersist) {
+    appConfig = await writeConfig(app, appConfig);
+  }
+
   if (appConfig.ai?.agentProvider && appConfig.ai.agentProvider !== "none") {
     if (appConfig.ai.agentProvider === "codex-cli") {
       appConfig.ai.mode = "codex";
@@ -628,12 +1128,17 @@ async function initializeAiMode() {
   }
 
   if (!appConfig.ai || appConfig.ai.mode === "ask") {
-    const choice = await promptForAiSetup();
+    const choice = await promptForAiSetup(parentWindow);
     if (choice === 0) {
       appConfig.ai.mode = "codex";
       appConfig.ai.agentProvider = "none";
     } else if (choice === 1) {
       appConfig.ai.mode = "local";
+      appConfig.ai.localBackend = "ollama";
+      appConfig.ai.localModelConsent = true;
+    } else if (choice === 2) {
+      appConfig.ai.mode = "local";
+      appConfig.ai.localBackend = "llama_cpp";
       appConfig.ai.localModelConsent = true;
     } else {
       appConfig.ai.mode = "disabled";
@@ -643,6 +1148,92 @@ async function initializeAiMode() {
   }
 
   await syncRuntimeFromConfig();
+}
+
+async function ensureLocalAiInstall(parentWindow) {
+  const setup = appConfig.setup || {};
+  const { localBackend, ollamaUrl, ollamaModel } = getLocalBackendConfig();
+  const setupKey = getLocalSetupFlag(localBackend);
+  if (setup[setupKey]) return;
+
+  if (localBackend === "ollama") {
+    const serverReady = await isOllamaServerReady(ollamaUrl);
+    if (serverReady && await hasOllamaModel(ollamaUrl, ollamaModel)) {
+      appConfig = await writeConfig(app, {
+        ...appConfig,
+        ai: {
+          ...appConfig.ai,
+          mode: appConfig.ai?.mode === "ask" || appConfig.ai?.mode === "disabled" ? "local" : appConfig.ai?.mode,
+        },
+        setup: {
+          ...setup,
+          [setupKey]: true,
+        },
+      });
+      await syncRuntimeFromConfig();
+      return;
+    }
+  } else {
+    const cached = await getCachedLlamaBinary(app);
+    if (cached) {
+      appConfig = await writeConfig(app, {
+        ...appConfig,
+        setup: {
+          ...setup,
+          [setupKey]: true,
+        },
+      });
+      return;
+    }
+  }
+
+  const installLabel = localBackend === "ollama" ? "Ollama" : "local AI";
+  const installDetail = localBackend === "ollama"
+    ? "This uses your configured Ollama runtime and Gemma model, then marks the setup as complete once the server and model are ready."
+    : "This downloads llama.cpp and the recommended Gemma model to a standard location under your user profile.";
+
+  const options = {
+    type: "question",
+    buttons: [`Install ${installLabel}`, "Not now"],
+    defaultId: 0,
+    cancelId: 1,
+    title: `Install ${installLabel}`,
+    message: `StudyBridge can install the ${installLabel} runtime in the background.`,
+    detail: installDetail,
+    noLink: true,
+  };
+
+  const response = parentWindow
+    ? await dialog.showMessageBox(parentWindow, options)
+    : await dialog.showMessageBox(options);
+
+  if (response.response === 0) {
+    appConfig = await writeConfig(app, {
+      ...appConfig,
+      ai: {
+        ...appConfig.ai,
+        mode: "local",
+        localBackend,
+        localModelConsent: true,
+      },
+      setup: {
+        ...setup,
+        [setupKey]: true,
+      },
+    });
+
+    logEvent("info", "local-ai-install-started", { localBackend });
+    syncRuntimeFromConfig().catch((error) => logEvent("error", "syncRuntimeFromConfig failed", error));
+    return;
+  }
+
+  appConfig = await writeConfig(app, {
+    ...appConfig,
+    setup: {
+      ...setup,
+      [setupKey]: true,
+    },
+  });
 }
 
 ipcMain.handle("studybridge:get-runtime-config", () => runtimeForRenderer());
@@ -705,6 +1296,13 @@ ipcMain.handle("studybridge:set-ai-settings", async (_event, nextAiSettings) => 
     ...(nextAiSettings || {}),
   };
 
+  if (next.mode === "local") {
+    next.localModelConsent = true;
+  }
+
+  next.ollamaUrl = normalizeOllamaUrl(next.ollamaUrl);
+  next.ollamaModel = next.ollamaModel || DEFAULT_OLLAMA_MODEL;
+
   const syncKey = (field, clearFlag) => {
     if (!Object.prototype.hasOwnProperty.call(nextAiSettings || {}, field)) {
       next[field] = current[field] || "";
@@ -753,6 +1351,87 @@ ipcMain.handle("studybridge:wait-local-ai", async () => {
 
   return runtimeForRenderer();
 });
+async function invokeLocalProvider(payload = {}) {
+  const { localBackend, ollamaUrl, ollamaModel } = getLocalBackendConfig();
+  const prompt = typeof payload.prompt === "string" ? payload.prompt : "";
+  const responseJsonSchema = payload.response_json_schema || null;
+  const explicitModel = typeof payload.model === "string" && payload.model.trim()
+    ? payload.model.trim()
+    : "";
+  const runtimeProvider = localAiRuntime?.provider === localBackend
+    ? localAiRuntime.provider
+    : localBackend;
+  const preset = getHardwarePreset();
+  const model = explicitModel || (runtimeProvider === "ollama"
+    ? ollamaModel
+    : (localAiRuntime?.provider === "llama_cpp" && localAiRuntime?.model) || `${preset.repo}:${preset.quant}`);
+  const url = runtimeProvider === "ollama"
+    ? ollamaUrl
+    : (localAiRuntime?.provider === "llama_cpp" && localAiRuntime?.url) || "http://127.0.0.1:8080";
+
+  if (!prompt.trim()) {
+    throw new Error("Prompt is empty.");
+  }
+
+  if (localAiPromise) {
+    try {
+      await localAiPromise;
+    } catch {
+      // keep the current runtime state; the caller will surface the failure if needed
+    }
+  }
+
+  if (["disabled", "error", "missing_provider", "missing_model", "starting", "downloading-model"].includes(localAiRuntime?.status)) {
+    const error = new Error(localAiRuntime.error || "Local AI is not ready. Open Settings to check the runtime.");
+    error.code = "AI_UNAVAILABLE";
+    throw error;
+  }
+
+  const response = await fetch(`${url}/v1/chat/completions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      stream: false,
+      messages: [
+        {
+          role: "system",
+          content: "You are StudyBridge's local tutor. Help students learn clearly, avoid hallucinating, and return valid JSON whenever a JSON schema is requested.",
+        },
+        {
+          role: "user",
+          content: `${prompt}${buildSchemaHint(responseJsonSchema)}`,
+        },
+      ],
+      temperature: responseJsonSchema ? 0.15 : 0.35,
+      top_p: 0.9,
+      max_tokens: responseJsonSchema ? 2048 : 1024,
+    }),
+  });
+
+  const rawText = await response.text();
+  if (!response.ok) {
+    const error = new Error(`Local AI request failed: ${response.status} ${rawText}`);
+    error.code = "AI_REQUEST_FAILED";
+    throw error;
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch (error) {
+    const parseError = new Error(`Local AI returned invalid JSON: ${error.message}`);
+    parseError.code = "AI_REQUEST_FAILED";
+    throw parseError;
+  }
+
+  const text = parsed?.choices?.[0]?.message?.content || "";
+  if (!responseJsonSchema) {
+    return text;
+  }
+
+  return extractJson(text);
+}
 async function invokeCloudProvider(payload = {}) {
   const aiConfig = appConfig.ai || {};
   const provider = typeof payload.provider === "string" && payload.provider.trim()
@@ -802,11 +1481,6 @@ async function invokeCloudProvider(payload = {}) {
     error.code = "AI_RATE_LIMITED";
     throw error;
   }
-
-  const buildSchemaHint = (schema) => {
-    if (!schema) return "";
-    return `\n\nReturn ONLY valid JSON. Match this schema as closely as possible:\n${JSON.stringify(schema, null, 2)}`;
-  };
 
   let text = "";
   if (provider === "openai") {
@@ -949,14 +1623,22 @@ async function invokeCloudProvider(payload = {}) {
     return text;
   }
 
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
+  return extractJson(text);
 }
+ipcMain.handle("studybridge:invoke-local-provider", async (_event, payload = {}) => invokeLocalProvider(payload));
 ipcMain.handle("studybridge:invoke-cloud-provider", async (_event, payload = {}) => invokeCloudProvider(payload));
 ipcMain.handle("studybridge:invoke-google-gemini", async (_event, payload = {}) => invokeCloudProvider({ ...payload, provider: "google" }));
+ipcMain.handle("studybridge:install-ollama", async () => {
+  const result = await installOllamaWithWinget();
+  if (result?.ok) {
+    try {
+      await syncRuntimeFromConfig();
+    } catch (error) {
+      logEvent("error", "syncRuntimeFromConfig failed", error);
+    }
+  }
+  return result;
+});
 ipcMain.handle("studybridge:get-local-profile", async () => getProfile(app));
 ipcMain.handle("studybridge:update-local-profile", async (_event, payload) => updateProfile(app, payload));
 ipcMain.handle("studybridge:reset-local-profile", async () => resetProfile(app));
@@ -980,14 +1662,24 @@ if (!gotLock) {
   });
 
   app.whenReady().then(async () => {
-    await initializeAiMode();
     createWindow();
+    try {
+      await initializeAiMode(mainWindow);
+      if (appConfig.ai?.mode !== "local") {
+        await ensureLocalAiInstall(mainWindow);
+      }
+    } catch (error) {
+      logEvent("error", "initializeAiMode failed", error);
+      dialog.showErrorBox("StudyBridge startup error", error?.message || String(error));
+    }
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) {
         createWindow();
       }
     });
+  }).catch((error) => {
+    logEvent("error", "app.whenReady failed", error);
   });
 
   app.on("before-quit", () => {

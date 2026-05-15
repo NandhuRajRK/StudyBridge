@@ -1,19 +1,30 @@
-import { useState, useEffect } from "react";
-import { studybridge } from "@/api/studybridgeClient";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Download, ExternalLink, Search, Trash2 } from "lucide-react";
+import { studybridge } from "@/api/studybridgeClient";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, FileText, BookOpen, Zap, StickyNote, Bookmark, MessageSquare, Trash2, HelpCircle, Download } from "lucide-react";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { isConversationRecord, isSavedAnswerRecord } from "@/lib/aiConversations";
 import { confirmAndDelete } from "@/lib/deleteEntity";
 import { downloadNotesMarkdown } from "@/lib/exporters";
 
+const TYPE_LABEL = {
+  material: "Material",
+  guide: "Guide",
+  mindmap: "Mind map",
+  flashcards: "Flashcards",
+  quiz: "Quiz",
+  note: "Note",
+  ai_chat: "AI chat",
+  saved_ai: "Saved AI",
+};
+
 export default function Library() {
   const [courses, setCourses] = useState([]);
+  const [topics, setTopics] = useState([]);
   const [materials, setMaterials] = useState([]);
   const [guides, setGuides] = useState([]);
-  const [mindMaps, setMindMaps] = useState([]);
   const [decks, setDecks] = useState([]);
   const [quizzes, setQuizzes] = useState([]);
   const [quizQuestions, setQuizQuestions] = useState([]);
@@ -21,56 +32,38 @@ export default function Library() {
   const [savedAnswers, setSavedAnswers] = useState([]);
   const [search, setSearch] = useState("");
   const [filterCourse, setFilterCourse] = useState("all");
+  const [filterTopic, setFilterTopic] = useState("all");
+  const [filterType, setFilterType] = useState("all");
   const [loading, setLoading] = useState(true);
 
   const loadData = async () => {
-    const [c, m, g, d, q, qq, n, s] = await Promise.all([
+    const [courseRows, topicRows, materialRows, guideRows, deckRows, quizRows, quizQuestionRows, noteRows, savedRows] = await Promise.all([
       studybridge.entities.Course.list("-created_date", 50),
-      studybridge.entities.StudyMaterial.list("-created_date", 100),
-      studybridge.entities.StudyGuide.list("-created_date", 50),
-      studybridge.entities.FlashcardDeck.list("-created_date", 50),
-      studybridge.entities.Quiz.list("-created_date", 50),
-      studybridge.entities.QuizQuestion.list("order", 300),
-      studybridge.entities.Note.list("-created_date", 100),
-      studybridge.entities.SavedAIAnswer.list("-created_date", 50),
+      studybridge.entities.Topic.list("-created_date", 300),
+      studybridge.entities.StudyMaterial.list("-created_date", 200),
+      studybridge.entities.StudyGuide.list("-created_date", 100),
+      studybridge.entities.FlashcardDeck.list("-created_date", 100),
+      studybridge.entities.Quiz.list("-created_date", 100),
+      studybridge.entities.QuizQuestion.list("order", 500),
+      studybridge.entities.Note.list("-created_date", 300),
+      studybridge.entities.SavedAIAnswer.list("-created_date", 200),
     ]);
 
-    setCourses(c);
-    setMaterials(m);
-    setGuides(g);
-    setMindMaps(g.filter((guide) => guide.source === "mindmap"));
-    setDecks(d); setQuizzes(q); setQuizQuestions(qq);
-    setNotes(n); setSavedAnswers(s);
+    setCourses(courseRows);
+    setTopics(topicRows);
+    setMaterials(materialRows);
+    setGuides(guideRows);
+    setDecks(deckRows);
+    setQuizzes(quizRows);
+    setQuizQuestions(quizQuestionRows);
+    setNotes(noteRows);
+    setSavedAnswers(savedRows);
     setLoading(false);
   };
 
   useEffect(() => {
     loadData().catch((error) => console.error("Failed to load library", error));
   }, []);
-
-  if (loading) return (
-    <div className="flex items-center justify-center h-full">
-      <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
-    </div>
-  );
-
-  const filter = (items) => {
-    let out = filterCourse !== "all" ? items.filter(i => i.course_id === filterCourse) : items;
-    if (search) {
-      const s = search.toLowerCase();
-      out = out.filter(i =>
-        (i.title || "").toLowerCase().includes(s) ||
-        (i.content || "").toLowerCase().includes(s) ||
-        (i.question || "").toLowerCase().includes(s) ||
-        (i.context || "").toLowerCase().includes(s)
-      );
-    }
-    return out;
-  };
-
-  const courseOf = (id) => courses.find(c => c.id === id);
-  const aiChats = savedAnswers.filter(isConversationRecord);
-  const savedAnswerItems = savedAnswers.filter(isSavedAnswerRecord);
 
   const handleDelete = async (entityName, item, label) => {
     try {
@@ -82,254 +75,307 @@ export default function Library() {
     }
   };
 
-  return (
-    <div className="p-6 lg:p-8 max-w-6xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Library</h1>
-        <p className="text-sm text-muted-foreground mt-1">All your materials, guides, notes, and saved content</p>
-      </div>
+  const rows = useMemo(() => {
+    const courseById = new Map(courses.map((course) => [course.id, course]));
+    const topicById = new Map(topics.map((topic) => [topic.id, topic]));
+    const aiChats = savedAnswers.filter(isConversationRecord);
+    const savedAnswerItems = savedAnswers.filter(isSavedAnswerRecord);
 
-      <div className="flex gap-3">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search..." className="pl-9" />
+    const result = [];
+
+    materials.forEach((item) => {
+      result.push({
+        id: `material-${item.id}`,
+        type: "material",
+        title: item.title || "Untitled material",
+        courseId: item.course_id || "",
+        topicId: item.topic_id || "",
+        courseTitle: courseById.get(item.course_id)?.title || "No course",
+        topicTitle: topicById.get(item.topic_id)?.title || item.topic_title || "—",
+        createdAt: item.created_date || item.updated_date || "",
+        source: item.type || item.status || "uploaded",
+        entity: "StudyMaterial",
+        entityRecord: item,
+        deleteLabel: item.title || "material",
+        openExternalUrl: item.file_url || "",
+        searchText: `${item.title || ""} ${item.summary || ""} ${item.type || ""}`.toLowerCase(),
+      });
+    });
+
+    guides.forEach((item) => {
+      const isMindMap = item.source === "mindmap";
+      result.push({
+        id: `guide-${item.id}`,
+        type: isMindMap ? "mindmap" : "guide",
+        title: item.title || "Untitled guide",
+        courseId: item.course_id || "",
+        topicId: "",
+        courseTitle: courseById.get(item.course_id)?.title || "No course",
+        topicTitle: "—",
+        createdAt: item.created_date || item.updated_date || "",
+        source: item.source || item.difficulty || "guide",
+        entity: "StudyGuide",
+        entityRecord: item,
+        deleteLabel: item.title || "guide",
+        openLink: isMindMap && item.course_id ? `/mindmap?course=${item.course_id}` : "",
+        exportGuide: true,
+        searchText: `${item.title || ""} ${item.source || ""} ${(item.key_concepts || []).join(" ")}`.toLowerCase(),
+      });
+    });
+
+    decks.forEach((item) => {
+      result.push({
+        id: `deck-${item.id}`,
+        type: "flashcards",
+        title: item.title || "Untitled deck",
+        courseId: item.course_id || "",
+        topicId: item.topic_id || "",
+        courseTitle: courseById.get(item.course_id)?.title || "No course",
+        topicTitle: topicById.get(item.topic_id)?.title || item.topic_title || "—",
+        createdAt: item.created_date || item.updated_date || "",
+        source: `${item.card_count || 0} cards`,
+        entity: "FlashcardDeck",
+        entityRecord: item,
+        deleteLabel: item.title || "flashcard deck",
+        searchText: `${item.title || ""} ${item.topic_title || ""}`.toLowerCase(),
+      });
+    });
+
+    quizzes.forEach((item) => {
+      const questionCount = quizQuestions.filter((question) => question.quiz_id === item.id).length || item.question_count || 0;
+      result.push({
+        id: `quiz-${item.id}`,
+        type: "quiz",
+        title: item.title || "Untitled quiz",
+        courseId: item.course_id || "",
+        topicId: item.topic_id || "",
+        courseTitle: courseById.get(item.course_id)?.title || "No course",
+        topicTitle: topicById.get(item.topic_id)?.title || item.topic_title || "—",
+        createdAt: item.created_date || item.updated_date || "",
+        source: `${questionCount} questions`,
+        entity: "Quiz",
+        entityRecord: item,
+        deleteLabel: item.title || "quiz",
+        searchText: `${item.title || ""} ${item.description || ""}`.toLowerCase(),
+      });
+    });
+
+    notes.forEach((item) => {
+      result.push({
+        id: `note-${item.id}`,
+        type: "note",
+        title: item.title || "Untitled note",
+        courseId: item.course_id || "",
+        topicId: item.topic_id || "",
+        courseTitle: courseById.get(item.course_id)?.title || "No course",
+        topicTitle: topicById.get(item.topic_id)?.title || item.topic_title || "—",
+        createdAt: item.created_date || item.updated_date || "",
+        source: "manual note",
+        entity: "Note",
+        entityRecord: item,
+        deleteLabel: item.title || "note",
+        exportNote: true,
+        searchText: `${item.title || ""} ${item.content || ""} ${(item.tags || []).join(" ")}`.toLowerCase(),
+      });
+    });
+
+    aiChats.forEach((item) => {
+      result.push({
+        id: `chat-${item.id}`,
+        type: "ai_chat",
+        title: item.title || "AI chat",
+        courseId: item.course_id || "",
+        topicId: item.topic_id || "",
+        courseTitle: courseById.get(item.course_id)?.title || "No course",
+        topicTitle: topicById.get(item.topic_id)?.title || item.topic_title || "—",
+        createdAt: item.created_date || item.updated_date || "",
+        source: `${item.message_count || item.messages?.length || 0} messages`,
+        entity: "SavedAIAnswer",
+        entityRecord: item,
+        deleteLabel: item.title || "AI chat",
+        openLink: `/study?conversation=${item.id}`,
+        searchText: `${item.title || ""} ${item.context || ""}`.toLowerCase(),
+      });
+    });
+
+    savedAnswerItems.forEach((item) => {
+      result.push({
+        id: `saved-${item.id}`,
+        type: "saved_ai",
+        title: item.question || "Saved AI answer",
+        courseId: item.course_id || "",
+        topicId: item.topic_id || "",
+        courseTitle: courseById.get(item.course_id)?.title || "No course",
+        topicTitle: topicById.get(item.topic_id)?.title || item.topic_title || "—",
+        createdAt: item.created_date || item.updated_date || "",
+        source: item.context || "saved answer",
+        entity: "SavedAIAnswer",
+        entityRecord: item,
+        deleteLabel: "saved AI answer",
+        searchText: `${item.question || ""} ${item.answer || ""} ${item.context || ""}`.toLowerCase(),
+      });
+    });
+
+    return result.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  }, [courses, decks, guides, materials, notes, quizQuestions, quizzes, savedAnswers, topics]);
+
+  const typeOptions = useMemo(() => {
+    const types = [...new Set(rows.map((row) => row.type))];
+    return types.sort();
+  }, [rows]);
+
+  const filteredRows = useMemo(() => {
+    const searchText = search.trim().toLowerCase();
+    return rows.filter((row) => {
+      if (filterCourse !== "all" && row.courseId !== filterCourse) return false;
+      if (filterTopic !== "all" && row.topicId !== filterTopic) return false;
+      if (filterType !== "all" && row.type !== filterType) return false;
+      if (!searchText) return true;
+      return (
+        row.searchText.includes(searchText) ||
+        row.courseTitle.toLowerCase().includes(searchText) ||
+        row.topicTitle.toLowerCase().includes(searchText) ||
+        row.source.toLowerCase().includes(searchText)
+      );
+    });
+  }, [filterCourse, filterTopic, filterType, rows, search]);
+
+  if (loading) return (
+    <div className="flex items-center justify-center h-full">
+      <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+    </div>
+  );
+
+  return (
+    <div className="h-full overflow-hidden bg-background">
+      <div className="flex h-full min-h-0 w-full flex-col gap-6 p-6 lg:p-8">
+        <div>
+          <h1 className="text-2xl font-semibold">Library</h1>
+          <p className="text-sm text-muted-foreground mt-1">Artifacts and AI chats in one filtered table view</p>
         </div>
-        <Select value={filterCourse} onValueChange={setFilterCourse}>
-          <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Courses</SelectItem>
-            {courses.map(c => <SelectItem key={c.id} value={c.id}>{c.title}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
 
-      <Tabs defaultValue="materials">
-        <TabsList className="flex-wrap h-auto">
-          <TabsTrigger value="materials" className="gap-1.5"><FileText className="w-3.5 h-3.5" /> Materials ({filter(materials).length})</TabsTrigger>
-          <TabsTrigger value="guides" className="gap-1.5"><BookOpen className="w-3.5 h-3.5" /> Guides ({filter(guides).length})</TabsTrigger>
-          <TabsTrigger value="mindmaps" className="gap-1.5"><GitBranch className="w-3.5 h-3.5" /> Mind Maps ({filter(mindMaps).length})</TabsTrigger>
-          <TabsTrigger value="flashcards" className="gap-1.5"><Zap className="w-3.5 h-3.5" /> Flashcards ({filter(decks).length})</TabsTrigger>
-          <TabsTrigger value="quizzes" className="gap-1.5"><HelpCircle className="w-3.5 h-3.5" /> Quizzes ({filter(quizzes).length})</TabsTrigger>
-          <TabsTrigger value="notes" className="gap-1.5"><StickyNote className="w-3.5 h-3.5" /> Notes ({filter(notes).length})</TabsTrigger>
-          <TabsTrigger value="ai-chats" className="gap-1.5"><MessageSquare className="w-3.5 h-3.5" /> AI Chats ({filter(aiChats).length})</TabsTrigger>
-          <TabsTrigger value="saved" className="gap-1.5"><Bookmark className="w-3.5 h-3.5" /> Saved AI ({filter(savedAnswerItems).length})</TabsTrigger>
-        </TabsList>
+        <div className="flex flex-col gap-3 md:flex-row md:flex-wrap">
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search artifacts or chats..." className="pl-9" />
+          </div>
+          <Select value={filterCourse} onValueChange={setFilterCourse}>
+            <SelectTrigger className="w-full md:w-52"><SelectValue placeholder="Course" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All courses</SelectItem>
+              {courses.map((course) => (
+                <SelectItem key={course.id} value={course.id}>{course.title}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={filterTopic} onValueChange={setFilterTopic}>
+            <SelectTrigger className="w-full md:w-56"><SelectValue placeholder="Topic" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All topics</SelectItem>
+              {topics.map((topic) => (
+                <SelectItem key={topic.id} value={topic.id}>{topic.title}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={filterType} onValueChange={setFilterType}>
+            <SelectTrigger className="w-full md:w-48"><SelectValue placeholder="Type" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All types</SelectItem>
+              {typeOptions.map((type) => (
+                <SelectItem key={type} value={type}>{TYPE_LABEL[type] || type}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
-        <TabsContent value="materials" className="mt-4">
-          <ItemGrid items={filter(materials)} empty="No materials uploaded yet." renderItem={m => (
-            <Card>
-              <div className="flex items-start gap-2">
-                <FileText className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
-                <div className="min-w-0 flex-1">
-                  <h3 className="font-medium text-sm truncate">{m.title}</h3>
-                  <p className="text-xs text-muted-foreground capitalize">{m.type} - {m.status}</p>
-                </div>
-                <DeleteButton onDelete={() => handleDelete("StudyMaterial", m, m.title || "material")} />
-              </div>
-              {m.summary && <p className="text-xs text-muted-foreground line-clamp-2">{m.summary}</p>}
-              <CourseTag course={courseOf(m.course_id)} />
-              {m.file_url && <a href={m.file_url} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline">View file</a>}
-            </Card>
-          )} />
-        </TabsContent>
-
-        <TabsContent value="guides" className="mt-4">
-          <ItemGrid items={filter(guides)} empty="No study guides yet." renderItem={g => (
-            <Card>
-              <div className="flex items-start gap-2">
-                <h3 className="font-medium text-sm flex-1">{g.title}</h3>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const filename = `${(g.title || "study-guide").toLowerCase().replace(/[^a-z0-9]+/g, "-") || "study-guide"}.md`;
-                      const content = Array.isArray(g.sections)
-                        ? g.sections.map((section, index) => `## ${section.title || `Section ${index + 1}`}\n\n${section.content || ""}`).join("\n\n")
-                        : "";
-                      downloadNotesMarkdown(filename, { title: g.title || "Study guide", content });
-                    }}
-                    className="text-muted-foreground hover:text-primary transition-colors"
-                    aria-label="Export study guide"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                  </button>
-                  <DeleteButton onDelete={() => handleDelete("StudyGuide", g, g.title || "study guide")} />
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground capitalize">{g.source === "mindmap" ? "Mind map" : g.difficulty}</p>
-              {g.key_concepts?.length > 0 && (
-                <div className="flex flex-wrap gap-1">
-                  {g.key_concepts.slice(0, 4).map((c, i) => <span key={i} className="text-xs bg-muted px-2 py-0.5 rounded">{c}</span>)}
-                </div>
-              )}
-              <CourseTag course={courseOf(g.course_id)} />
-            </Card>
-          )} />
-        </TabsContent>
-
-        <TabsContent value="mindmaps" className="mt-4">
-          <ItemGrid items={filter(mindMaps)} empty="No mind maps yet." renderItem={g => (
-            <Card>
-              <div className="flex items-start gap-2">
-                <GitBranch className="w-4 h-4 text-primary shrink-0 mt-0.5" />
-                <div className="min-w-0 flex-1">
-                  <h3 className="font-medium text-sm truncate">{g.title}</h3>
-                  <p className="text-xs text-muted-foreground">Mind map</p>
-                </div>
-                <Link
-                  to={`/mindmap?course=${g.course_id}`}
-                  className="text-xs text-primary hover:underline shrink-0"
-                >
-                  Open
-                </Link>
-              </div>
-              <CourseTag course={courseOf(g.course_id)} />
-            </Card>
-          )} />
-        </TabsContent>
-
-        <TabsContent value="flashcards" className="mt-4">
-          <ItemGrid items={filter(decks)} empty="No flashcard decks yet." renderItem={d => (
-            <Card>
-              <div className="flex items-center gap-2">
-                <Zap className="w-4 h-4 text-accent" />
-                <h3 className="font-medium text-sm flex-1">{d.title}</h3>
-                <DeleteButton onDelete={() => handleDelete("FlashcardDeck", d, d.title || "flashcard deck")} />
-              </div>
-              <p className="text-xs text-muted-foreground">{d.card_count || 0} cards - {d.mastered_count || 0} mastered</p>
-              <CourseTag course={courseOf(d.course_id)} />
-            </Card>
-          )} />
-        </TabsContent>
-
-        <TabsContent value="quizzes" className="mt-4">
-          <ItemGrid items={filter(quizzes)} empty="No practice quizzes yet." renderItem={quiz => {
-            const questions = quizQuestions.filter(q => q.quiz_id === quiz.id);
-            return (
-              <Card>
-                <div className="flex items-start gap-2">
-                  <HelpCircle className="w-4 h-4 text-primary shrink-0 mt-0.5" />
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-medium text-sm">{quiz.title}</h3>
-                    <p className="text-xs text-muted-foreground">{questions.length || quiz.question_count || 0} questions</p>
-                  </div>
-                  <DeleteButton onDelete={() => handleDelete("Quiz", quiz, quiz.title || "quiz")} />
-                </div>
-                {quiz.description && <p className="text-sm text-muted-foreground line-clamp-2">{quiz.description}</p>}
-                {questions.slice(0, 2).map((question, index) => (
-                  <div key={question.id} className="rounded-md bg-muted/50 p-2">
-                    <p className="text-xs font-medium">{index + 1}. {question.question}</p>
-                    <p className="text-xs text-muted-foreground mt-1">Answer: {question.correct}</p>
-                  </div>
+        <div className="bg-card border rounded-lg min-h-0 flex-1 overflow-auto">
+          {filteredRows.length === 0 ? (
+            <p className="p-8 text-center text-sm text-muted-foreground">No items match your current filters.</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Course</TableHead>
+                  <TableHead>Topic</TableHead>
+                  <TableHead>Created</TableHead>
+                  <TableHead>Source</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredRows.map((row) => (
+                  <TableRow key={row.id}>
+                    <TableCell>
+                      <div className="min-w-0">
+                        <p className="text-xs uppercase tracking-wide text-muted-foreground">{TYPE_LABEL[row.type] || row.type}</p>
+                        <p className="font-medium truncate">{row.title}</p>
+                      </div>
+                    </TableCell>
+                    <TableCell>{row.courseTitle}</TableCell>
+                    <TableCell>{row.topicTitle || "—"}</TableCell>
+                    <TableCell>{row.createdAt ? new Date(row.createdAt).toLocaleDateString() : "—"}</TableCell>
+                    <TableCell className="max-w-[240px] truncate">{row.source}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        {row.openLink && (
+                          <Link to={row.openLink} className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
+                            Open <ExternalLink className="w-3.5 h-3.5" />
+                          </Link>
+                        )}
+                        {row.openExternalUrl && (
+                          <a href={row.openExternalUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
+                            View file <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        )}
+                        {row.exportGuide && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const guide = row.entityRecord;
+                              const filename = `${(guide.title || "study-guide").toLowerCase().replace(/[^a-z0-9]+/g, "-") || "study-guide"}.md`;
+                              const content = Array.isArray(guide.sections)
+                                ? guide.sections.map((section, index) => `## ${section.title || `Section ${index + 1}`}\n\n${section.content || ""}`).join("\n\n")
+                                : "";
+                              downloadNotesMarkdown(filename, { title: guide.title || "Study guide", content });
+                            }}
+                            className="text-muted-foreground hover:text-primary transition-colors"
+                            aria-label="Export guide"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        {row.exportNote && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const note = row.entityRecord;
+                              const filename = `${(note.title || "note").toLowerCase().replace(/[^a-z0-9]+/g, "-") || "note"}.md`;
+                              downloadNotesMarkdown(filename, note);
+                            }}
+                            className="text-muted-foreground hover:text-primary transition-colors"
+                            aria-label="Export note"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(row.entity, row.entityRecord, row.deleteLabel)}
+                          className="text-muted-foreground hover:text-destructive transition-colors"
+                          aria-label="Delete row"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
                 ))}
-                <CourseTag course={courseOf(quiz.course_id)} />
-              </Card>
-            );
-          }} />
-        </TabsContent>
-
-        <TabsContent value="notes" className="mt-4">
-          <ItemGrid items={filter(notes)} empty="No notes yet." renderItem={n => (
-            <Card>
-              <div className="flex items-start gap-2">
-                <h3 className="font-medium text-sm flex-1">{n.title}</h3>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => downloadNotesMarkdown(`${(n.title || "note").toLowerCase().replace(/[^a-z0-9]+/g, "-") || "note"}.md`, n)}
-                    className="text-muted-foreground hover:text-primary transition-colors"
-                    aria-label="Export note"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                  </button>
-                  <DeleteButton onDelete={() => handleDelete("Note", n, n.title || "note")} />
-                </div>
-              </div>
-              <p className="text-sm text-muted-foreground line-clamp-3">{n.content}</p>
-              {n.tags?.length > 0 && (
-                <div className="flex flex-wrap gap-1">
-                  {n.tags.map((t, i) => <span key={i} className="text-xs bg-muted px-2 py-0.5 rounded">#{t}</span>)}
-                </div>
-              )}
-              <CourseTag course={courseOf(n.course_id)} />
-            </Card>
-          )} />
-        </TabsContent>
-
-        <TabsContent value="saved" className="mt-4">
-          <ItemGrid items={filter(savedAnswerItems)} empty="No saved AI answers yet." renderItem={s => (
-            <Card>
-              <div className="flex items-start gap-2">
-                <p className="text-sm font-medium flex-1">{s.question}</p>
-                <DeleteButton onDelete={() => handleDelete("SavedAIAnswer", s, "saved AI answer")} />
-              </div>
-              <p className="text-sm text-muted-foreground line-clamp-4">{s.answer}</p>
-              {s.context && <p className="text-xs text-muted-foreground italic">{s.context}</p>}
-            </Card>
-          )} />
-        </TabsContent>
-
-        <TabsContent value="ai-chats" className="mt-4">
-          <ItemGrid items={filter(aiChats)} empty="No AI chat history yet." renderItem={chat => (
-            <Card>
-              <div className="flex items-center gap-2">
-                <MessageSquare className="w-4 h-4 text-primary" />
-                <Link to={`/ai-tutor?conversation=${chat.id}`} className="font-medium text-sm line-clamp-1 flex-1 hover:text-primary">
-                  {chat.title || "AI chat"}
-                </Link>
-                <DeleteButton onDelete={() => handleDelete("SavedAIAnswer", chat, chat.title || "AI chat")} />
-              </div>
-              <p className="text-xs text-muted-foreground">{chat.context || "General"} - {chat.message_count || chat.messages?.length || 0} messages</p>
-              {chat.messages?.length > 0 && (
-                <p className="text-sm text-muted-foreground line-clamp-3">
-                  {chat.messages[chat.messages.length - 1]?.content}
-                </p>
-              )}
-              <CourseTag course={courseOf(chat.course_id)} />
-            </Card>
-          )} />
-        </TabsContent>
-      </Tabs>
-    </div>
-  );
-}
-
-function Card({ children }) {
-  return <div className="bg-card border rounded-lg p-4 space-y-2">{children}</div>;
-}
-
-function ItemGrid({ items, empty, renderItem }) {
-  if (items.length === 0) return <p className="text-center text-sm text-muted-foreground py-10">{empty}</p>;
-  return (
-    <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-      {items.map(item => <div key={item.id}>{renderItem(item)}</div>)}
-    </div>
-  );
-}
-
-function DeleteButton({ onDelete }) {
-  return (
-    <button
-      type="button"
-      onClick={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        onDelete();
-      }}
-      className="text-muted-foreground hover:text-destructive transition-colors"
-      aria-label="Delete"
-    >
-      <Trash2 className="w-3.5 h-3.5" />
-    </button>
-  );
-}
-
-function CourseTag({ course }) {
-  if (!course) return null;
-  return (
-    <div className="flex items-center gap-1.5">
-      <div className="w-2 h-2 rounded-full" style={{ backgroundColor: course.color }} />
-      <span className="text-xs text-muted-foreground">{course.title}</span>
+              </TableBody>
+            </Table>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { studybridge } from "@/api/studybridgeClient";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -7,23 +7,47 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 
-export default function AddTaskDialog({ open, onClose, courses, topics = [], onCreated }) {
+const DEFAULT_FORM = {
+  title: "",
+  type: "study",
+  priority: "medium",
+  due_date: "",
+  course_id: "",
+  topic_id: "",
+  estimated_minutes: "",
+  instructions: "",
+  outcome: "",
+};
+
+function normalizeInitialValues(initialValues = {}) {
+  if (!initialValues || typeof initialValues !== "object") return {};
+  return {
+    due_date: typeof initialValues.due_date === "string" ? initialValues.due_date : "",
+    course_id: typeof initialValues.course_id === "string" ? initialValues.course_id : "",
+    topic_id: typeof initialValues.topic_id === "string" ? initialValues.topic_id : "",
+    title: typeof initialValues.title === "string" ? initialValues.title : "",
+    type: typeof initialValues.type === "string" ? initialValues.type : "study",
+    priority: typeof initialValues.priority === "string" ? initialValues.priority : "medium",
+    estimated_minutes: initialValues.estimated_minutes ? String(initialValues.estimated_minutes) : "",
+    instructions: typeof initialValues.instructions === "string" ? initialValues.instructions : "",
+    outcome: typeof initialValues.outcome === "string" ? initialValues.outcome : "",
+  };
+}
+
+export default function AddTaskDialog({ open, onClose, courses, topics = [], onCreated, initialValues = {} }) {
   const [form, setForm] = useState({
-    title: "",
-    type: "study",
-    priority: "medium",
-    due_date: "",
-    course_id: "",
-    topic_id: "",
-    estimated_minutes: "",
-    instructions: "",
-    outcome: "",
+    ...DEFAULT_FORM,
+    ...normalizeInitialValues(initialValues),
   });
   const [saving, setSaving] = useState(false);
 
-  const courseTopics = topics.filter(t => t.course_id === form.course_id);
-
-  const updateForm = (patch) => setForm(f => ({ ...f, ...patch }));
+  useEffect(() => {
+    if (!open) return;
+    setForm({
+      ...DEFAULT_FORM,
+      ...normalizeInitialValues(initialValues),
+    });
+  }, [initialValues, open]);
 
   const resetForm = () => setForm({
     title: "",
@@ -36,6 +60,10 @@ export default function AddTaskDialog({ open, onClose, courses, topics = [], onC
     instructions: "",
     outcome: "",
   });
+
+  const courseTopics = topics.filter(t => t.course_id === form.course_id);
+
+  const updateForm = (patch) => setForm(f => ({ ...f, ...patch }));
 
   const handleSubmit = async (e) => {
     e.preventDefault();

@@ -24,39 +24,20 @@ The app is built for:
 
 StudyBridge keeps the app in control of the important parts:
 
-- The UI builds course, profile, topic, and upload context
-- The model or CLI returns structured output
-- StudyBridge validates that output before any write happens
-- Writes and deletes are staged for explicit approval
-- Desktop storage uses SQLite and local files
-- The web build can still use Supabase
 
 This lets the app stay:
 
-- grounded
-- local-first
-- safer to review
-- easier to explain in a demo
-
-## User Documentation
 
 The full student guide lives inside the app at `Docs`.
 
 For provider-specific setup and official references, use the `Official docs` dropdown in `Settings`.
 
-## Desktop And Web
+## Desktop
 
-### Desktop
-
-- Windows and macOS are the main desktop targets
+- Windows-only desktop build
 - Local AI runs through `llama.cpp`
 - The app auto-selects a Gemma variant based on available memory
-- OpenCode, Gemini CLI, Claude Code, and Codex CLI are optional on-demand providers
-
-### Web
-
-- The web build can keep using Supabase
-- ChromeOS users should use the web/PWA version rather than Electron
+- Optional Codex CLI and cloud API key providers
 
 ## Official Runtime Docs
 
@@ -71,19 +52,12 @@ For provider-specific setup and official references, use the `Official docs` dro
 
 ```bash
 npm install
-cp .env.example .env.local
-npm run dev
-```
-
-## Desktop Development
-
-```bash
 npm run desktop:dev
 ```
 
 ## Packaging
 
-Build the web app first, then package the desktop app:
+Build the renderer, then package the desktop app:
 
 ```bash
 npm run build
@@ -118,6 +92,7 @@ Scanned PDFs and image-only uploads do not use OCR yet, so those are weaker unle
 ```bash
 npm run build
 npm run lint
+npm run test
 ```
 
 ## Hackathon Positioning

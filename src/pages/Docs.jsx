@@ -28,14 +28,15 @@ const sections = [
   },
   {
     title: "6. Storage and privacy",
-    body: "Desktop uses local SQLite and local files. The web version can still use Supabase, but the desktop path is designed to stay local-first and offline-friendly.",
+    body: "Desktop uses local SQLite and local files. The app stays local-first and offline-friendly.",
   },
 ];
 
 export default function Docs() {
   return (
-    <div className="p-6 lg:p-8 max-w-6xl mx-auto space-y-8">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+    <div className="h-full overflow-hidden bg-background">
+      <div className="flex h-full min-h-0 w-full flex-col gap-8 p-6 lg:p-8">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="space-y-3 max-w-3xl">
           <div className="inline-flex items-center gap-2 rounded-full border bg-muted/40 px-3 py-1 text-xs font-medium text-muted-foreground">
             <BookOpenText className="w-3.5 h-3.5" />
@@ -64,6 +65,7 @@ export default function Docs() {
         </div>
       </div>
 
+      <div className="min-h-0 flex-1 overflow-y-auto pr-1 space-y-8">
       <div className="grid gap-4 md:grid-cols-2">
         {sections.map((section) => (
           <Card key={section.title} className="border-border/60">
@@ -144,11 +146,13 @@ export default function Docs() {
           <h2 className="font-semibold text-base">Notes for reviewers</h2>
         </div>
         <p className="text-sm text-muted-foreground leading-6">
-          StudyBridge is built as a local-first student platform. The desktop version uses SQLite, local files, and optional AI providers. The web version can still be hosted if you need a cloud demo.
+          StudyBridge is built as a local-first student platform. The desktop version uses SQLite, local files, and optional AI providers.
         </p>
         <p className="text-sm text-muted-foreground leading-6">
           If you are evaluating it for a hackathon or portfolio review, the most important flow to test is: create a course, upload material, generate study outputs, approve any writes, and inspect progress over time.
         </p>
+      </div>
+      </div>
       </div>
     </div>
   );

@@ -1,15 +1,49 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { RotateCcw, ChevronLeft, ChevronRight, Check, X, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import MarkdownContent from "@/components/ui/markdown-content";
 import { downloadFlashcardsAnki } from "@/lib/exporters";
 
-export default function StudyFlashcards({ cards }) {
+function getSourceIds(item = {}) {
+  return Array.isArray(item.source_ids)
+    ? item.source_ids
+    : Array.isArray(item.sourceIds)
+      ? item.sourceIds
+      : item.source_id
+        ? [item.source_id]
+        : [];
+}
+
+function getSourceLabel(sourceCatalog = [], sourceId) {
+  return sourceCatalog.find((source) => source.id === sourceId)?.label || sourceId;
+}
+
+export default function StudyFlashcards({ cards, sourceCatalog = [], onCardResult, onComplete }) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [results, setResults] = useState({});
+  const completionSentRef = useRef(false);
+  const hasCards = Array.isArray(cards) && cards.length > 0;
 
-  if (!cards || cards.length === 0) {
+  useEffect(() => {
+    if (!hasCards) return;
+    completionSentRef.current = false;
+    setCurrentIndex(0);
+    setFlipped(false);
+    setResults({});
+  }, [hasCards, cards]);
+
+  useEffect(() => {
+    if (!hasCards || Object.keys(results).length !== cards.length || completionSentRef.current) return;
+    completionSentRef.current = true;
+    onComplete?.({
+      cards,
+      results,
+      correctCount: Object.values(results).filter((item) => item === "correct").length,
+    });
+  }, [cards, hasCards, onComplete, results]);
+
+  if (!hasCards) {
     return <div className="p-6 text-center text-muted-foreground">No flashcards available.</div>;
   }
 
@@ -19,6 +53,12 @@ export default function StudyFlashcards({ cards }) {
 
   const handleResult = (result) => {
     setResults(prev => ({ ...prev, [currentIndex]: result }));
+    onCardResult?.({
+      card,
+      cardIndex: currentIndex,
+      result,
+      isCorrect: result === "correct",
+    });
     if (currentIndex < total - 1) {
       setTimeout(() => {
         setFlipped(false);
@@ -65,7 +105,7 @@ export default function StudyFlashcards({ cards }) {
         <div className="text-center py-12">
           <h3 className="text-xl font-semibold mb-2">Session Complete!</h3>
           <p className="text-muted-foreground mb-4">{correct}/{total} correct</p>
-          <Button onClick={() => { setCurrentIndex(0); setFlipped(false); setResults({}); }} className="gap-2">
+          <Button onClick={() => { completionSentRef.current = false; setCurrentIndex(0); setFlipped(false); setResults({}); }} className="gap-2">
             <RotateCcw className="w-4 h-4" /> Review Again
           </Button>
         </div>
@@ -88,6 +128,16 @@ export default function StudyFlashcards({ cards }) {
               )}
             </div>
           </button>
+
+          {getSourceIds(card).length > 0 && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {getSourceIds(card).map((sourceId) => (
+                <span key={sourceId} className="inline-flex items-center rounded-full border bg-muted/30 px-2.5 py-1 text-[11px] text-muted-foreground">
+                  {getSourceLabel(sourceCatalog, sourceId)}
+                </span>
+              ))}
+            </div>
+          )}
 
           {/* Actions */}
           {flipped && (

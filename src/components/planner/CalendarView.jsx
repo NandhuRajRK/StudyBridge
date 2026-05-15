@@ -17,7 +17,7 @@ import { buildIcsForEvents, buildTaskCalendarMeta, buildGoogleCalendarUrl, dateK
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-export default function CalendarView({ tasks, courses, topics = [] }) {
+export default function CalendarView({ tasks, courses, topics = [], onCreateTaskAtDate }) {
   const [currentMonth, setCurrentMonth] = useState(startOfMonth(new Date()));
   const [selectedDate, setSelectedDate] = useState(new Date());
 
@@ -79,7 +79,7 @@ export default function CalendarView({ tasks, courses, topics = [] }) {
         <div>
           <p className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Month calendar</p>
           <h3 className="text-lg font-semibold">{format(currentMonth, "MMMM yyyy")}</h3>
-          <p className="text-sm text-muted-foreground">Tasks are placed by due date. Click any day to inspect the work.</p>
+          <p className="text-sm text-muted-foreground">Tasks are placed by due date. Click any day to inspect work and open a prefilled Add Task form.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={() => setCurrentMonth((value) => addMonths(value, -1))} className="gap-2">
@@ -119,11 +119,15 @@ export default function CalendarView({ tasks, courses, topics = [] }) {
               key={dateKey}
               role="button"
               tabIndex={0}
-              onClick={() => setSelectedDate(day)}
+              onClick={() => {
+                setSelectedDate(day);
+                onCreateTaskAtDate?.(dateKey);
+              }}
               onKeyDown={(event) => {
                 if (event.key === "Enter" || event.key === " ") {
                   event.preventDefault();
                   setSelectedDate(day);
+                  onCreateTaskAtDate?.(dateKey);
                 }
               }}
               className={`min-h-[150px] rounded-lg border p-2 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-primary/30 ${

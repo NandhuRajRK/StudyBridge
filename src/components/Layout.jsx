@@ -1,12 +1,13 @@
 import { Outlet, Link, useLocation } from "react-router-dom";
 import { 
-  LayoutDashboard, BookOpen, Brain, Calendar, 
-  TrendingUp, Library, Bot, Settings, LogOut, GraduationCap, GitBranch, FileText
+  LayoutDashboard, BookOpen, Brain, Calendar,
+  TrendingUp, Library, Settings, LogOut, FileText
 } from "lucide-react";
 import { studybridge } from "@/api/studybridgeClient";
 import { useState, useEffect } from "react";
 import { isDesktopApp } from "@/lib/runtime";
 import { useLocale } from "@/lib/locale";
+import GlobalTutorDrawer from "@/components/GlobalTutorDrawer";
 
 const navItems = [
   { path: "/", labelKey: "nav.dashboard", icon: LayoutDashboard },
@@ -15,8 +16,6 @@ const navItems = [
   { path: "/planner", labelKey: "nav.planner", icon: Calendar },
   { path: "/progress", labelKey: "nav.progress", icon: TrendingUp },
   { path: "/library", labelKey: "nav.library", icon: Library },
-  { path: "/mindmap", labelKey: "nav.mindMap", icon: GitBranch },
-  { path: "/ai-tutor", labelKey: "nav.aiTutor", icon: Bot },
   { path: "/docs", labelKey: "nav.docs", icon: FileText },
   { path: "/settings", labelKey: "nav.settings", icon: Settings },
 ];
@@ -41,16 +40,8 @@ export default function Layout() {
     <div className="flex h-screen overflow-hidden">
       {/* Sidebar */}
       <aside className={`${collapsed ? 'w-16' : 'w-60'} bg-sidebar text-sidebar-foreground flex flex-col transition-all duration-200 shrink-0`}>
-        {/* Logo */}
-        <div className="h-16 flex items-center px-4 gap-3 border-b border-sidebar-border">
-          <div className="w-8 h-8 rounded-lg bg-sidebar-primary flex items-center justify-center shrink-0">
-            <GraduationCap className="w-4.5 h-4.5 text-sidebar-primary-foreground" />
-          </div>
-          {!collapsed && <span className="font-semibold text-sm tracking-tight">StudyBridge</span>}
-        </div>
-
         {/* Navigation */}
-        <nav className="flex-1 py-3 px-2 space-y-0.5 overflow-y-auto">
+        <nav className="flex-1 py-4 px-2 space-y-0.5 overflow-y-auto">
           {navItems.map((item) => {
             const Icon = item.icon;
             const active = isActive(item.path);
@@ -96,9 +87,12 @@ export default function Layout() {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-y-auto">
-        <Outlet />
+      <main className="flex-1 min-h-0 overflow-hidden">
+        <div className="h-full overflow-hidden">
+          <Outlet />
+        </div>
       </main>
+      <GlobalTutorDrawer />
     </div>
   );
 }

@@ -1,35 +1,59 @@
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { formatDistanceToNow } from "date-fns";
+import { ArrowDown, ArrowUp, ArrowUpDown, BookOpen, Plus, Trash2 } from "lucide-react";
 import { studybridge } from "@/api/studybridgeClient";
-import { Link } from "react-router-dom";
-import { Plus, BookOpen, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { differenceInDays } from "date-fns";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import CreateCourseDialog from "@/components/courses/CreateCourseDialog";
 import { confirmAndDelete } from "@/lib/deleteEntity";
 
+const SORTABLE_COLUMNS = {
+  code: true,
+  course: true,
+  progress: true,
+  topics: true,
+  last_studied: true,
+  next_task: true,
+};
+
+function sortIcon(active, direction) {
+  if (!active) return <ArrowUpDown className="h-3.5 w-3.5" />;
+  return direction === "asc" ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />;
+}
+
 export default function Courses() {
+  const navigate = useNavigate();
   const [courses, setCourses] = useState([]);
   const [topics, setTopics] = useState([]);
+  const [sessions, setSessions] = useState([]);
+  const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  const [sortBy, setSortBy] = useState("course");
+  const [sortDirection, setSortDirection] = useState("asc");
 
   useEffect(() => {
     loadData();
   }, []);
 
   const loadData = async () => {
-    const [c, t] = await Promise.all([
+    const [courseRows, topicRows, sessionRows, taskRows] = await Promise.all([
       studybridge.entities.Course.list("-created_date", 50),
-      studybridge.entities.Topic.list("-created_date", 200),
+      studybridge.entities.Topic.list("-created_date", 300),
+      studybridge.entities.StudySession.list("-created_date", 400),
+      studybridge.entities.Task.list("due_date", 400),
     ]);
-    setCourses(c);
-    setTopics(t);
+    setCourses(courseRows);
+    setTopics(topicRows);
+    setSessions(sessionRows);
+    setTasks(taskRows);
     setLoading(false);
   };
 
   const handleCourseCreated = (newCourse) => {
-    setCourses(prev => [newCourse, ...prev]);
+    setCourses((prev) => [newCourse, ...prev]);
     setShowCreate(false);
   };
 
@@ -43,6 +67,87 @@ export default function Courses() {
     }
   };
 
+  const rows = useMemo(() => {
+    const topicCountByCourse = new Map();
+    topics.forEach((topic) => {
+      topicCountByCourse.set(topic.course_id, (topicCountByCourse.get(topic.course_id) || 0) + 1);
+    });
+
+    const lastSessionByCourse = new Map();
+    sessions.forEach((session) => {
+      if (!session.course_id || !session.created_date) return;
+      const current = lastSessionByCourse.get(session.course_id);
+      const nextTime = new Date(session.created_date).getTime();
+      const currentTime = current ? new Date(current.created_date).getTime() : Number.NEGATIVE_INFINITY;
+      if (nextTime > currentTime) {
+        lastSessionByCourse.set(session.course_id, session);
+      }
+    });
+
+    const nextTaskByCourse = new Map();
+    tasks
+      .filter((task) => task.status !== "completed")
+      .forEach((task) => {
+        if (!task.course_id) return;
+        const current = nextTaskByCourse.get(task.course_id);
+        const taskDue = task.due_date ? new Date(task.due_date).getTime() : Number.POSITIVE_INFINITY;
+        const currentDue = current?.due_date ? new Date(current.due_date).getTime() : Number.POSITIVE_INFINITY;
+        if (!current || taskDue < currentDue) {
+          nextTaskByCourse.set(task.course_id, task);
+        }
+      });
+
+    const mapped = courses.map((course) => {
+      const lastSession = lastSessionByCourse.get(course.id) || null;
+      const nextTask = nextTaskByCourse.get(course.id) || null;
+      return {
+        course,
+        topicCount: topicCountByCourse.get(course.id) || 0,
+        progress: Number(course.overall_progress || 0),
+        lastSession,
+        nextTask,
+      };
+    });
+
+    const multiplier = sortDirection === "asc" ? 1 : -1;
+    mapped.sort((a, b) => {
+      if (sortBy === "code") {
+        return multiplier * String(a.course.code || "").localeCompare(String(b.course.code || ""));
+      }
+      if (sortBy === "progress") {
+        return multiplier * (a.progress - b.progress);
+      }
+      if (sortBy === "topics") {
+        return multiplier * (a.topicCount - b.topicCount);
+      }
+      if (sortBy === "last_studied") {
+        const left = a.lastSession?.created_date ? new Date(a.lastSession.created_date).getTime() : Number.NEGATIVE_INFINITY;
+        const right = b.lastSession?.created_date ? new Date(b.lastSession.created_date).getTime() : Number.NEGATIVE_INFINITY;
+        return multiplier * (left - right);
+      }
+      if (sortBy === "next_task") {
+        const left = a.nextTask?.due_date ? new Date(a.nextTask.due_date).getTime() : Number.POSITIVE_INFINITY;
+        const right = b.nextTask?.due_date ? new Date(b.nextTask.due_date).getTime() : Number.POSITIVE_INFINITY;
+        return multiplier * (left - right);
+      }
+      return multiplier * String(a.course.title || "").localeCompare(String(b.course.title || ""));
+    });
+
+    return mapped;
+  }, [courses, sessions, sortBy, sortDirection, tasks, topics]);
+
+  const handleSort = (column) => {
+    if (!SORTABLE_COLUMNS[column]) return;
+    setSortBy((current) => {
+      if (current === column) {
+        setSortDirection((dir) => (dir === "asc" ? "desc" : "asc"));
+        return current;
+      }
+      setSortDirection("asc");
+      return column;
+    });
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -51,108 +156,138 @@ export default function Courses() {
     );
   }
 
-  const activeCourses = courses.filter(c => c.status === "active");
-  const completedCourses = courses.filter(c => c.status === "completed");
+  const activeCourseCount = courses.filter((course) => course.status === "active").length;
 
   return (
-    <div className="p-6 lg:p-8 max-w-6xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Courses</h1>
-          <p className="text-sm text-muted-foreground mt-1">{activeCourses.length} active courses</p>
-        </div>
-        <Button onClick={() => setShowCreate(true)} className="gap-2">
-          <Plus className="w-4 h-4" /> Add Course
-        </Button>
-      </div>
-
-      {courses.length === 0 ? (
-        <div className="bg-card border rounded-lg p-12 text-center">
-          <BookOpen className="w-12 h-12 text-muted-foreground/30 mx-auto mb-4" />
-          <h2 className="text-lg font-medium mb-2">No courses yet</h2>
-          <p className="text-sm text-muted-foreground mb-6 max-w-md mx-auto">
-            Add your university courses to start organizing study materials and tracking progress.
-          </p>
+    <div className="h-full overflow-hidden bg-background">
+      <div className="flex h-full min-h-0 w-full flex-col gap-6 p-6 lg:p-8">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold">Courses</h1>
+            <p className="text-sm text-muted-foreground mt-1">{activeCourseCount} active courses</p>
+          </div>
           <Button onClick={() => setShowCreate(true)} className="gap-2">
-            <Plus className="w-4 h-4" /> Add Your First Course
+            <Plus className="w-4 h-4" /> Add Course
           </Button>
         </div>
-      ) : (
-        <>
-          <CourseSection title="Active" courses={activeCourses} topics={topics} onDelete={handleDeleteCourse} />
-          <CourseSection title="Completed" courses={completedCourses} topics={topics} onDelete={handleDeleteCourse} />
-        </>
-      )}
 
-      <CreateCourseDialog open={showCreate} onClose={() => setShowCreate(false)} onCreated={handleCourseCreated} />
-    </div>
-  );
-}
-
-function CourseSection({ title, courses, topics, onDelete }) {
-  if (courses.length === 0) return null;
-  return (
-    <section>
-      <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3">{title}</h2>
-      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {courses.map(course => (
-          <CourseCard
-            key={course.id}
-            course={course}
-            topics={topics.filter(t => t.course_id === course.id)}
-            onDelete={onDelete}
-          />
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function CourseCard({ course, topics, onDelete }) {
-  const topicCount = topics.length;
-  const daysUntilExam = course.exam_date ? differenceInDays(new Date(course.exam_date), new Date()) : null;
-
-  return (
-    <div className="bg-card border rounded-lg p-5 hover:shadow-md transition-all group">
-      <div className="flex items-start gap-3 mb-3">
-        <Link
-          to={`/courses/${course.id}`}
-          className="w-10 h-10 rounded-lg flex items-center justify-center text-white text-sm font-semibold shrink-0"
-          style={{ backgroundColor: course.color || "#3B5BDB" }}
-        >
-          {course.code?.substring(0, 2) || course.title.substring(0, 2).toUpperCase()}
-        </Link>
-        <Link to={`/courses/${course.id}`} className="min-w-0 flex-1">
-          <h3 className="font-medium group-hover:text-primary transition-colors truncate">{course.title}</h3>
-          <p className="text-sm text-muted-foreground">{course.code} - {course.term}</p>
-        </Link>
-        <button
-          type="button"
-          onClick={() => onDelete(course)}
-          className="text-muted-foreground hover:text-destructive transition-colors"
-          aria-label="Delete course"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-        </button>
-      </div>
-
-      {course.instructor && (
-        <p className="text-xs text-muted-foreground mb-3">Prof. {course.instructor}</p>
-      )}
-
-      <div className="space-y-2">
-        <div className="flex justify-between text-xs text-muted-foreground">
-          <span>{topicCount} topics</span>
-          <span>{course.overall_progress || 0}%</span>
+        <div className="min-h-0 flex-1">
+          {courses.length === 0 ? (
+            <div className="bg-card border rounded-lg h-full p-12 text-center flex flex-col items-center justify-center">
+              <BookOpen className="w-12 h-12 text-muted-foreground/30 mx-auto mb-4" />
+              <h2 className="text-lg font-medium mb-2">No courses yet</h2>
+              <p className="text-sm text-muted-foreground mb-6 max-w-md mx-auto">
+                Add your university courses to start organizing study materials and tracking progress.
+              </p>
+              <Button onClick={() => setShowCreate(true)} className="gap-2">
+                <Plus className="w-4 h-4" /> Add Your First Course
+              </Button>
+            </div>
+          ) : (
+            <div className="bg-card border rounded-lg h-full overflow-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>
+                      <button type="button" onClick={() => handleSort("code")} className="inline-flex items-center gap-1.5">
+                        Code {sortIcon(sortBy === "code", sortDirection)}
+                      </button>
+                    </TableHead>
+                    <TableHead>
+                      <button type="button" onClick={() => handleSort("course")} className="inline-flex items-center gap-1.5">
+                        Course {sortIcon(sortBy === "course", sortDirection)}
+                      </button>
+                    </TableHead>
+                    <TableHead>
+                      <button type="button" onClick={() => handleSort("progress")} className="inline-flex items-center gap-1.5">
+                        Progress {sortIcon(sortBy === "progress", sortDirection)}
+                      </button>
+                    </TableHead>
+                    <TableHead>
+                      <button type="button" onClick={() => handleSort("topics")} className="inline-flex items-center gap-1.5">
+                        Topics {sortIcon(sortBy === "topics", sortDirection)}
+                      </button>
+                    </TableHead>
+                    <TableHead>
+                      <button type="button" onClick={() => handleSort("last_studied")} className="inline-flex items-center gap-1.5">
+                        Last studied {sortIcon(sortBy === "last_studied", sortDirection)}
+                      </button>
+                    </TableHead>
+                    <TableHead>
+                      <button type="button" onClick={() => handleSort("next_task")} className="inline-flex items-center gap-1.5">
+                        Next task {sortIcon(sortBy === "next_task", sortDirection)}
+                      </button>
+                    </TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.map(({ course, progress, topicCount, lastSession, nextTask }) => (
+                    <TableRow
+                      key={course.id}
+                      className="cursor-pointer"
+                      onClick={() => navigate(`/courses/${course.id}`)}
+                    >
+                      <TableCell>{course.code || "—"}</TableCell>
+                      <TableCell>
+                        <div className="min-w-0">
+                          <p className="font-medium truncate">{course.title}</p>
+                          <p className="text-xs text-muted-foreground truncate">
+                            {course.term || "No term"} · {course.status === "completed" ? "Completed" : "Active"}
+                          </p>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="min-w-[150px] space-y-1">
+                          <div className="flex items-center justify-between text-xs text-muted-foreground">
+                            <span>{progress}%</span>
+                          </div>
+                          <Progress value={progress} className="h-1.5" />
+                        </div>
+                      </TableCell>
+                      <TableCell>{topicCount}</TableCell>
+                      <TableCell>
+                        {lastSession?.created_date
+                          ? formatDistanceToNow(new Date(lastSession.created_date), { addSuffix: true })
+                          : "Never"}
+                      </TableCell>
+                      <TableCell>
+                        {nextTask ? (
+                          <div className="min-w-0">
+                            <p className="truncate text-sm">{nextTask.title}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {nextTask.due_date ? `Due ${new Date(nextTask.due_date).toLocaleDateString()}` : "No due date"}
+                            </p>
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">No open task</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-2" onClick={(event) => event.stopPropagation()}>
+                          <Button size="sm" variant="outline" onClick={() => navigate(`/courses/${course.id}`)}>
+                            Open
+                          </Button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteCourse(course)}
+                            className="text-muted-foreground hover:text-destructive transition-colors"
+                            aria-label="Delete course"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </div>
-        <Progress value={course.overall_progress || 0} className="h-1.5" />
-      </div>
 
-      {daysUntilExam !== null && daysUntilExam >= 0 && (
-        <p className={`text-xs mt-3 ${daysUntilExam <= 7 ? "text-destructive font-medium" : "text-muted-foreground"}`}>
-          {daysUntilExam === 0 ? "Exam today" : `Exam in ${daysUntilExam} days`}
-        </p>
-      )}
+        <CreateCourseDialog open={showCreate} onClose={() => setShowCreate(false)} onCreated={handleCourseCreated} />
+      </div>
     </div>
   );
 }

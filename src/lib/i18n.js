@@ -21,7 +21,6 @@ const TRANSLATIONS = {
       progress: "Progress",
       library: "Library",
       mindMap: "Mind map",
-      aiTutor: "AI Tutor",
       docs: "Docs",
       settings: "Settings",
     },
@@ -119,7 +118,7 @@ const TRANSLATIONS = {
       planner: "प्लानर",
       progress: "प्रगति",
       library: "लाइब्रेरी",
-      aiTutor: "एआई ट्यूटर",
+      mindMap: "माइंड मैप",
       settings: "सेटिंग्स",
     },
     common: {

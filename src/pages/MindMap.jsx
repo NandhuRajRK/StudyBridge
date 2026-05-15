@@ -1,16 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { studybridge } from "@/api/studybridgeClient";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import AiAccessNotice from "@/components/ai/AiAccessNotice";
-import { getDesktopAiNotice, isDesktopAiUnavailable, loadDesktopAiRuntime } from "@/lib/desktopAi";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { isDesktopAiUnavailable, loadDesktopAiRuntime } from "@/lib/desktopAi";
 import { loadStudyContextBundle } from "@/lib/aiContext";
-import { Loader2, Save, Sparkles, Plus, Trash2, GitBranch, RefreshCw, Download, HelpCircle, ZoomIn, ZoomOut, Move } from "lucide-react";
+import { Download, Expand, GitBranch, HelpCircle, Loader2, Minimize2, Move, Plus, RefreshCw, Save, Sparkles, Trash2, ZoomIn, ZoomOut } from "lucide-react";
 import { useLocale } from "@/lib/locale";
 import { downloadMindMapMarkdown, downloadOpml } from "@/lib/exporters";
+import { Background, ReactFlow, ViewportPortal, MarkerType, applyNodeChanges } from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
 
 const ROOT_NODE_COLOR = "#3B5BDB";
 const DEFAULT_NODE_COLOR = "#1098AD";
@@ -43,6 +45,8 @@ function normalizeNodes(nodes = [], rootTitle = "Mind map") {
       title: String(node.title || "").trim(),
       note: String(node.note || "").trim(),
       color: node.color || (isRoot ? ROOT_NODE_COLOR : DEFAULT_NODE_COLOR),
+      x: Number.isFinite(node.x) ? node.x : undefined,
+      y: Number.isFinite(node.y) ? node.y : undefined,
     };
     seen.set(id, next);
     return next;
@@ -64,13 +68,17 @@ function buildSeedMap(course, topics) {
     title: course?.title || "Mind map",
     note: course?.code ? `Course code: ${course.code}` : "Course overview",
     color: ROOT_NODE_COLOR,
+    x: 0,
+    y: 0,
   };
-  const children = (topics || []).slice(0, 12).map((topic) => ({
+  const children = (topics || []).slice(0, 12).map((topic, index) => ({
     id: makeId(),
     parentId: rootId,
     title: topic.title,
     note: topic.description || `Mastery: ${topic.mastery_level || 0}%`,
     color: topic.mastery_level >= 70 ? "#37B24D" : topic.mastery_level > 0 ? "#F59F00" : DEFAULT_NODE_COLOR,
+    x: Math.cos((index / Math.max(1, Math.min(12, topics.length))) * Math.PI * 2) * 260,
+    y: Math.sin((index / Math.max(1, Math.min(12, topics.length))) * Math.PI * 2) * 220,
   }));
 
   return [root, ...children];
@@ -100,9 +108,9 @@ function collectDescendants(nodes, nodeId) {
   return toDelete;
 }
 
-function computeLayout(nodes) {
+function ensureNodePositions(nodes) {
   const root = nodes.find((node) => !node.parentId) || nodes[0];
-  if (!root) return { layout: [], edges: [] };
+  if (!root) return [];
 
   const childrenByParent = new Map();
   nodes.forEach((node) => {
@@ -132,38 +140,81 @@ function computeLayout(nodes) {
     grouped.get(depth).push(node);
   });
 
-  const centerX = 500;
-  const centerY = 360;
-  const layout = nodes.map((node) => {
-    const depth = depthById.get(node.id) || 0;
+  return nodes.map((node) => {
     if (Number.isFinite(node.x) && Number.isFinite(node.y)) {
-      return { ...node, depth, x: node.x, y: node.y };
+      return node;
     }
+
+    const depth = depthById.get(node.id) || 0;
+    if (depth === 0) {
+      return { ...node, x: 0, y: 0 };
+    }
+
     const siblings = grouped.get(depth) || [];
     const index = Math.max(0, siblings.findIndex((item) => item.id === node.id));
-    if (depth === 0) {
-      return { ...node, depth, x: centerX, y: centerY };
-    }
+    const radiusX = 260 + (depth - 1) * 220;
+    const radiusY = 220 + (depth - 1) * 180;
+    const angle = (index / Math.max(1, siblings.length)) * Math.PI * 2 - Math.PI / 2 + depth * 0.16;
 
-    const radius = 170 + (depth - 1) * 175;
-    const angle = (index / Math.max(1, siblings.length)) * Math.PI * 2 - Math.PI / 2 + depth * 0.18;
     return {
       ...node,
-      depth,
-      x: centerX + Math.cos(angle) * radius,
-      y: centerY + Math.sin(angle) * radius,
+      x: Math.cos(angle) * radiusX,
+      y: Math.sin(angle) * radiusY,
     };
   });
+}
 
-  const positionedById = new Map(layout.map((node) => [node.id, node]));
-  const edges = layout
-    .filter((node) => node.parentId && positionedById.has(node.parentId))
-    .map((node) => ({
-      from: positionedById.get(node.parentId),
-      to: node,
-    }));
+function iconButton(tooltip, icon, onClick, disabled = false) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button type="button" size="icon" variant="outline" onClick={onClick} disabled={disabled} aria-label={tooltip}>
+          {icon}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{tooltip}</TooltipContent>
+    </Tooltip>
+  );
+}
 
-  return { layout, edges };
+function toFlowNode(node, selectedNodeId) {
+  const isRoot = node.parentId === null;
+  const active = node.id === selectedNodeId;
+  return {
+    id: node.id,
+    position: { x: Number(node.x || 0), y: Number(node.y || 0) },
+    selectable: true,
+    draggable: true,
+    data: {
+      label: (
+        <div className="min-w-0">
+          <div className="flex items-start gap-2">
+            <span
+              className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full"
+              style={{ backgroundColor: active ? "white" : (node.color || DEFAULT_NODE_COLOR) }}
+            />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium leading-tight">{node.title}</p>
+              {node.note ? (
+                <p className={`mt-1 line-clamp-2 text-xs leading-5 ${active ? "text-primary-foreground/80" : "text-muted-foreground"}`}>
+                  {node.note}
+                </p>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ),
+    },
+    style: {
+      width: isRoot ? 260 : 220,
+      borderRadius: 14,
+      border: active ? "1px solid hsl(var(--primary))" : "1px solid hsl(var(--border))",
+      background: active ? "hsl(var(--primary))" : "hsl(var(--card))",
+      color: active ? "hsl(var(--primary-foreground))" : "hsl(var(--foreground))",
+      boxShadow: active ? "0 10px 24px rgba(37, 99, 235, 0.22)" : "0 8px 18px rgba(15, 23, 42, 0.08)",
+      padding: 0,
+    },
+  };
 }
 
 export default function MindMap() {
@@ -181,12 +232,8 @@ export default function MindMap() {
   const [saving, setSaving] = useState(false);
   const [building, setBuilding] = useState(false);
   const [runtime, setRuntime] = useState(null);
-  const [helpOpen, setHelpOpen] = useState(false);
-  const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const canvasRef = useRef(null);
-  const dragStateRef = useRef(null);
-  const panStateRef = useRef(null);
+  const [canvasExpanded, setCanvasExpanded] = useState(false);
+  const [rfInstance, setRfInstance] = useState(null);
 
   useEffect(() => {
     loadDesktopAiRuntime().then(setRuntime);
@@ -225,107 +272,78 @@ export default function MindMap() {
         ? normalizeNodes(existingSections, course?.title || "Mind map")
         : buildSeedMap(course, courseTopics);
 
+      const positioned = ensureNodePositions(nextNodes);
       setRecord(existing);
-      setNodes(nextNodes);
-      setSelectedNodeId(nextNodes[0]?.id || "");
+      setNodes(positioned);
+      setSelectedNodeId(positioned[0]?.id || "");
       setNewChildTitle("");
       setNewChildNote("");
-      setPan({ x: 0, y: 0 });
-      setZoom(1);
     };
 
     loadMindMap().catch((error) => console.error("Failed to load mind map", error));
   }, [selectedCourseId, courses]);
 
   const selectedCourse = courses.find((course) => course.id === selectedCourseId);
-  const selectedNode = nodes.find((node) => node.id === selectedNodeId) || nodes[0] || null;
+  const selectedNode = nodes.find((node) => node.id === selectedNodeId) || null;
   const aiUnavailable = isDesktopAiUnavailable(runtime);
-  const aiNotice = getDesktopAiNotice(runtime, t);
-  const { layout = [], edges = [] } = useMemo(() => computeLayout(nodes), [nodes]);
 
-  const updateNodePosition = (nodeId, x, y) => {
-    setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, x, y } : node)));
-  };
+  const flowNodes = useMemo(
+    () => nodes.map((node) => toFlowNode(node, selectedNodeId)),
+    [nodes, selectedNodeId],
+  );
 
-  const canvasPointFromClient = (clientX, clientY) => {
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return null;
-    const scale = zoom || 1;
-    return {
-      x: ((clientX - rect.left) / scale) - (pan.x / scale),
-      y: ((clientY - rect.top) / scale) - (pan.y / scale),
-    };
-  };
+  const flowEdges = useMemo(
+    () => nodes
+      .filter((node) => node.parentId)
+      .map((node) => ({
+        id: `e-${node.parentId}-${node.id}`,
+        source: node.parentId,
+        target: node.id,
+        type: "smoothstep",
+        markerEnd: { type: MarkerType.ArrowClosed },
+        style: { stroke: "hsl(var(--border))", strokeWidth: 1.6 },
+      })),
+    [nodes],
+  );
 
-  const handleNodePointerDown = (event, node) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setSelectedNodeId(node.id);
-    const origin = canvasPointFromClient(event.clientX, event.clientY);
-    if (!origin) return;
-    dragStateRef.current = {
-      nodeId: node.id,
-      pointerId: event.pointerId,
-      startX: origin.x,
-      startY: origin.y,
-      nodeX: node.x,
-      nodeY: node.y,
-    };
-    event.currentTarget.setPointerCapture(event.pointerId);
-  };
+  const onFlowNodesChange = useCallback((changes) => {
+    setNodes((prev) => {
+      const base = prev.map((node) => ({
+        id: node.id,
+        position: { x: Number(node.x || 0), y: Number(node.y || 0) },
+        data: {},
+      }));
+      const changed = applyNodeChanges(changes, base);
+      const byId = new Map(prev.map((node) => [node.id, node]));
+      return changed
+        .map((flowNode) => {
+          const current = byId.get(flowNode.id);
+          if (!current) return null;
+          return {
+            ...current,
+            x: Number(flowNode.position?.x || 0),
+            y: Number(flowNode.position?.y || 0),
+          };
+        })
+        .filter(Boolean);
+    });
 
-  const handleCanvasPointerDown = (event) => {
-    if (event.target !== canvasRef.current) return;
-    panStateRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      originX: pan.x,
-      originY: pan.y,
-    };
-    canvasRef.current?.setPointerCapture(event.pointerId);
-  };
-
-  const handleCanvasPointerMove = (event) => {
-    if (dragStateRef.current?.pointerId === event.pointerId) {
-      const point = canvasPointFromClient(event.clientX, event.clientY);
-      if (!point) return;
-      const offsetX = point.x - dragStateRef.current.startX;
-      const offsetY = point.y - dragStateRef.current.startY;
-      updateNodePosition(
-        dragStateRef.current.nodeId,
-        dragStateRef.current.nodeX + offsetX,
-        dragStateRef.current.nodeY + offsetY,
-      );
-      return;
+    const selected = changes.find((change) => change.type === "select" && change.selected);
+    if (selected?.id) {
+      setSelectedNodeId(selected.id);
     }
+  }, []);
 
-    if (panStateRef.current?.pointerId === event.pointerId) {
-      const scale = zoom || 1;
-      setPan({
-        x: panStateRef.current.originX + ((event.clientX - panStateRef.current.startX) / scale),
-        y: panStateRef.current.originY + ((event.clientY - panStateRef.current.startY) / scale),
-      });
-    }
-  };
-
-  const endPointerInteraction = (event) => {
-    if (dragStateRef.current?.pointerId === event.pointerId) {
-      dragStateRef.current = null;
-    }
-    if (panStateRef.current?.pointerId === event.pointerId) {
-      panStateRef.current = null;
-    }
-  };
-
-  const addChildNode = (parentId = selectedNode?.id) => {
-    if (!parentId || !newChildTitle.trim()) return;
+  const addChildNode = () => {
+    if (!selectedNode?.id || !newChildTitle.trim()) return;
     const nextNode = {
       id: makeId(),
-      parentId,
+      parentId: selectedNode.id,
       title: newChildTitle.trim(),
       note: newChildNote.trim(),
       color: DEFAULT_NODE_COLOR,
+      x: Number(selectedNode.x || 0) + 240,
+      y: Number(selectedNode.y || 0) + ((Math.random() - 0.5) * 120),
     };
     setNodes((prev) => [...prev, nextNode]);
     setSelectedNodeId(nextNode.id);
@@ -335,7 +353,7 @@ export default function MindMap() {
 
   const updateSelectedNode = (patch) => {
     if (!selectedNode) return;
-    setNodes((prev) => prev.map((node) => node.id === selectedNode.id ? { ...node, ...patch } : node));
+    setNodes((prev) => prev.map((node) => (node.id === selectedNode.id ? { ...node, ...patch } : node)));
   };
 
   const deleteSelectedNode = () => {
@@ -347,10 +365,12 @@ export default function MindMap() {
   };
 
   const resetFromTopics = () => {
-    const course = selectedCourse;
-    const seeded = buildSeedMap(course, topics);
+    const seeded = ensureNodePositions(buildSeedMap(selectedCourse, topics));
     setNodes(seeded);
     setSelectedNodeId(seeded[0]?.id || "");
+    requestAnimationFrame(() => {
+      rfInstance?.fitView({ padding: 0.2, duration: 350 });
+    });
   };
 
   const exportMindMapMarkdown = () => {
@@ -372,7 +392,7 @@ export default function MindMap() {
         title: `${selectedCourse?.title || "Course"} mind map`,
         difficulty: "custom",
         key_concepts: nodes.filter((node) => node.parentId === nodes[0]?.id).map((node) => node.title).slice(0, 12),
-        sections: nodes.map(({ x, y, depth: _depth, ...rest }) => ({
+        sections: nodes.map(({ x, y, ...rest }) => ({
           ...rest,
           x: Number.isFinite(x) ? x : null,
           y: Number.isFinite(y) ? y : null,
@@ -440,18 +460,18 @@ Return JSON with:
 
       const aiNodes = Array.isArray(result?.nodes) ? result.nodes : [];
       if (aiNodes.length > 0) {
-        setNodes((prev) => [
-          ...prev,
-          ...aiNodes
-            .filter((node) => node?.title)
-            .map((node) => ({
-              id: makeId(),
-              parentId: selectedNode.id,
-              title: node.title,
-              note: node.note || "",
-              color: node.color || "#F59F00",
-            })),
-        ]);
+        const next = aiNodes
+          .filter((node) => node?.title)
+          .map((node, index) => ({
+            id: makeId(),
+            parentId: selectedNode.id,
+            title: node.title,
+            note: node.note || "",
+            color: node.color || "#F59F00",
+            x: Number(selectedNode.x || 0) + 240 + ((index % 2) * 70),
+            y: Number(selectedNode.y || 0) + ((index - Math.floor(aiNodes.length / 2)) * 95),
+          }));
+        setNodes((prev) => [...prev, ...next]);
       }
     } catch (error) {
       console.error("Failed to expand mind map", error);
@@ -461,242 +481,179 @@ Return JSON with:
     }
   };
 
+  const fitView = () => rfInstance?.fitView({ padding: 0.2, duration: 300 });
+  const zoomIn = () => rfInstance?.zoomIn({ duration: 180 });
+  const zoomOut = () => rfInstance?.zoomOut({ duration: 180 });
+
   if (courses.length === 0) {
     return (
-      <div className="p-6 lg:p-8 max-w-3xl mx-auto">
-        <h1 className="text-2xl font-semibold mb-2">{t("nav.mindMap")}</h1>
-        <p className="text-sm text-muted-foreground">Add a course first, then you can build a visual mind map around its topics.</p>
+      <div className="h-full overflow-hidden bg-background">
+        <div className="flex h-full min-h-0 w-full flex-col justify-center p-6 lg:p-8">
+          <h1 className="text-2xl font-semibold mb-2">{t("nav.mindMap")}</h1>
+          <p className="text-sm text-muted-foreground">Add a course first, then you can build a visual mind map around its topics.</p>
+        </div>
       </div>
     );
   }
 
   if (!selectedCourseId || !selectedCourse) {
     return (
-      <div className="p-6 lg:p-8 max-w-3xl mx-auto">
-        <h1 className="text-2xl font-semibold mb-2">{t("nav.mindMap")}</h1>
-        <p className="text-sm text-muted-foreground">Select a course to open its mind map.</p>
+      <div className="h-full overflow-hidden bg-background">
+        <div className="flex h-full min-h-0 w-full flex-col justify-center p-6 lg:p-8">
+          <h1 className="text-2xl font-semibold mb-2">{t("nav.mindMap")}</h1>
+          <p className="text-sm text-muted-foreground">Select a course to open its mind map.</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-semibold">{t("nav.mindMap")}</h1>
-            <button
-              type="button"
-              onClick={() => setHelpOpen((value) => !value)}
-              className="text-muted-foreground hover:text-foreground transition-colors"
-              aria-label="How to use mind map"
-            >
-              <HelpCircle className="w-4 h-4" />
-            </button>
-          </div>
-          <p className="text-sm text-muted-foreground mt-1">
-            Build a visual map from your course topics, notes, and AI-generated branches.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => setZoom((value) => Math.max(0.6, Number((value - 0.1).toFixed(2))))} className="gap-2">
-            <ZoomOut className="w-4 h-4" /> Zoom out
-          </Button>
-          <Button variant="outline" onClick={() => setZoom((value) => Math.min(1.8, Number((value + 0.1).toFixed(2))))} className="gap-2">
-            <ZoomIn className="w-4 h-4" /> Zoom in
-          </Button>
-          <Button variant="outline" onClick={resetFromTopics} className="gap-2">
-            <RefreshCw className="w-4 h-4" /> Rebuild from topics
-          </Button>
-          <Button variant="outline" onClick={exportMindMapMarkdown} disabled={nodes.length === 0} className="gap-2">
-            <Download className="w-4 h-4" /> Export MD
-          </Button>
-          <Button variant="outline" onClick={exportMindMapOpml} disabled={nodes.length === 0} className="gap-2">
-            <Download className="w-4 h-4" /> Export OPML
-          </Button>
-          <Button variant="outline" onClick={expandWithAI} disabled={building || aiUnavailable || !selectedNode} className="gap-2">
-            {building ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-            {building ? "Expanding..." : "Expand with AI"}
-          </Button>
-          <Button onClick={saveMindMap} disabled={saving || nodes.length === 0} className="gap-2">
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-            {saving ? "Saving..." : "Save map"}
-          </Button>
-        </div>
-      </div>
-
-      {aiUnavailable && (
-        <AiAccessNotice title="Mindmap AI is not ready on this desktop" message={aiNotice} />
-      )}
-
-      {helpOpen && (
-        <div className="rounded-xl border bg-card p-4 text-sm text-muted-foreground space-y-2">
-          <p className="font-medium text-foreground flex items-center gap-2">
-            <HelpCircle className="w-4 h-4" /> Mind map help
-          </p>
-          <p>Drag nodes to rearrange them. Drag on empty space to pan. Use the zoom buttons for large maps.</p>
-          <p>Save the map to keep it attached to the course. You can reopen it later from the course detail page or Library.</p>
-        </div>
-      )}
-
-      <div className="grid gap-6 xl:grid-cols-[1.7fr_.9fr]">
-        <div className="space-y-4">
-          <div className="rounded-xl border bg-card p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="space-y-1">
-              <p className="text-sm font-medium">Course</p>
-              <p className="text-xs text-muted-foreground">Choose a course and shape the map around its structure.</p>
+    <TooltipProvider delayDuration={120}>
+      <div className="h-full overflow-hidden bg-background">
+        <div className="flex h-full min-h-0 w-full flex-col gap-4 p-6 lg:p-8">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-semibold">{t("nav.mindMap")}</h1>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-border/70 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    aria-label="How to use mind map"
+                  >
+                    <HelpCircle className="h-4 w-4" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-sm leading-relaxed">
+                  Drag nodes to rearrange. Click a node to edit it in-place. Double click empty canvas to create a child branch.
+                </TooltipContent>
+              </Tooltip>
             </div>
-            <Select value={selectedCourseId} onValueChange={setSelectedCourseId}>
-              <SelectTrigger className="w-full sm:w-72">
-                <SelectValue placeholder="Select a course" />
-              </SelectTrigger>
-              <SelectContent>
-                {courses.map((course) => (
-                  <SelectItem key={course.id} value={course.id}>{course.title}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button variant="outline" onClick={() => navigate(`/courses/${selectedCourseId}`)} className="gap-2">
-              <Move className="w-4 h-4" /> Open course
-            </Button>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {iconButton("Zoom out", <ZoomOut className="h-4 w-4" />, zoomOut)}
+              {iconButton("Zoom in", <ZoomIn className="h-4 w-4" />, zoomIn)}
+              {iconButton("Fit map", <Move className="h-4 w-4" />, fitView)}
+              {iconButton("Rebuild from topics", <RefreshCw className="h-4 w-4" />, resetFromTopics)}
+              {iconButton("Export markdown", <Download className="h-4 w-4" />, exportMindMapMarkdown, nodes.length === 0)}
+              {iconButton("Export OPML", <GitBranch className="h-4 w-4" />, exportMindMapOpml, nodes.length === 0)}
+              {iconButton(
+                building ? "Expanding..." : "Expand with AI",
+                building ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />,
+                expandWithAI,
+                building || aiUnavailable || !selectedNode,
+              )}
+              {iconButton(
+                saving ? "Saving..." : "Save map",
+                saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />,
+                saveMindMap,
+                saving || nodes.length === 0,
+              )}
+              {iconButton(
+                canvasExpanded ? "Collapse canvas" : "Expand canvas",
+                canvasExpanded ? <Minimize2 className="h-4 w-4" /> : <Expand className="h-4 w-4" />,
+                () => setCanvasExpanded((value) => !value),
+              )}
+            </div>
           </div>
 
           <div className="rounded-xl border bg-card p-4">
-            <div
-              ref={canvasRef}
-              className="relative min-h-[720px] overflow-hidden rounded-lg bg-gradient-to-b from-background to-muted/20 touch-none select-none"
-              onPointerDown={handleCanvasPointerDown}
-              onPointerMove={handleCanvasPointerMove}
-              onPointerUp={endPointerInteraction}
-              onPointerCancel={endPointerInteraction}
-              onDoubleClick={(event) => {
-                const point = canvasPointFromClient(event.clientX, event.clientY);
-                if (!point) return;
-                const parentId = selectedNode?.id || layout[0]?.id;
-                if (!parentId) return;
-                setNodes((prev) => [
-                  ...prev,
-                  {
-                    id: makeId(),
-                    parentId,
-                    title: "New branch",
-                    note: "",
-                    color: DEFAULT_NODE_COLOR,
-                    x: point.x,
-                    y: point.y,
-                  },
-                ]);
-              }}
-            >
-              <div
-                className="absolute left-0 top-0 h-full w-full origin-top-left"
-                style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
-              >
-                <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 1000 720" preserveAspectRatio="none">
-                  {edges.map((edge) => (
-                    <line
-                      key={`${edge.from.id}-${edge.to.id}`}
-                      x1={edge.from.x}
-                      y1={edge.from.y}
-                      x2={edge.to.x}
-                      y2={edge.to.y}
-                      stroke="hsl(var(--border))"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                    />
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <Select value={selectedCourseId} onValueChange={setSelectedCourseId}>
+                <SelectTrigger className="w-full sm:w-80">
+                  <SelectValue placeholder="Select a course" />
+                </SelectTrigger>
+                <SelectContent>
+                  {courses.map((course) => (
+                    <SelectItem key={course.id} value={course.id}>{course.title}</SelectItem>
                   ))}
-                </svg>
+                </SelectContent>
+              </Select>
 
-                {layout.length === 0 ? (
-                  <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
-                    No nodes yet. Rebuild from topics or add a child branch.
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="outline"
+                    onClick={() => navigate(`/courses/${selectedCourseId}`)}
+                    aria-label="Open course"
+                  >
+                    <Move className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Open course</TooltipContent>
+              </Tooltip>
+            </div>
+          </div>
+
+          <div className={`min-h-0 flex-1 overflow-hidden rounded-xl border bg-card ${canvasExpanded ? "h-[calc(100vh-220px)]" : "h-[72vh]"}`}>
+            <ReactFlow
+              nodes={flowNodes}
+              edges={flowEdges}
+              onNodesChange={onFlowNodesChange}
+              onNodeClick={(_, node) => setSelectedNodeId(node.id)}
+              onPaneClick={() => setSelectedNodeId("")}
+              onInit={setRfInstance}
+              fitView
+              minZoom={0.2}
+              maxZoom={2.4}
+              nodesConnectable={false}
+              elementsSelectable
+              deleteKeyCode={null}
+              className="bg-gradient-to-b from-background to-muted/20"
+            >
+              <Background gap={24} size={1.2} color="hsl(var(--border))" />
+
+              {selectedNode && (
+                <ViewportPortal>
+                  <div
+                    className="absolute z-30 w-[320px] rounded-xl border bg-card p-3 shadow-xl"
+                    style={{ transform: `translate(${Number(selectedNode.x || 0) + 170}px, ${Number(selectedNode.y || 0) - 40}px)` }}
+                  >
+                    <div className="mb-2 flex items-center justify-between">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Selected node</p>
+                      {selectedNode.parentId !== null ? (
+                        <Button type="button" variant="destructive" size="icon" onClick={deleteSelectedNode} aria-label="Delete branch">
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      ) : null}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Input
+                        value={selectedNode.title}
+                        onChange={(event) => updateSelectedNode({ title: event.target.value })}
+                        placeholder="Node title"
+                      />
+                      <Textarea
+                        value={selectedNode.note || ""}
+                        onChange={(event) => updateSelectedNode({ note: event.target.value })}
+                        placeholder="Node note"
+                        rows={3}
+                      />
+                      <Input
+                        value={newChildTitle}
+                        onChange={(event) => setNewChildTitle(event.target.value)}
+                        placeholder="Child branch title"
+                      />
+                      <Textarea
+                        value={newChildNote}
+                        onChange={(event) => setNewChildNote(event.target.value)}
+                        placeholder="Child branch note (optional)"
+                        rows={2}
+                      />
+                      <Button type="button" variant="outline" className="w-full gap-2" onClick={addChildNode}>
+                        <Plus className="h-4 w-4" /> Add child branch
+                      </Button>
+                    </div>
                   </div>
-                ) : layout.map((node) => {
-                  const active = node.id === selectedNodeId;
-                  return (
-                    <button
-                      key={node.id}
-                      type="button"
-                      onClick={() => setSelectedNodeId(node.id)}
-                      onPointerDown={(event) => handleNodePointerDown(event, node)}
-                      className={`absolute z-10 -translate-x-1/2 -translate-y-1/2 rounded-xl border px-4 py-3 text-left shadow-sm transition-all cursor-grab active:cursor-grabbing ${
-                        active ? "border-primary bg-primary text-primary-foreground shadow-md scale-[1.03]" : "bg-card hover:border-primary/60 hover:shadow-md"
-                      }`}
-                      style={{
-                        left: `${node.x}px`,
-                        top: `${node.y}px`,
-                        maxWidth: node.depth === 0 ? 260 : 210,
-                        minWidth: node.depth === 0 ? 220 : 170,
-                      }}
-                    >
-                      <div className="flex items-start gap-2">
-                        <div
-                          className="mt-1 h-2.5 w-2.5 rounded-full shrink-0"
-                          style={{ backgroundColor: active ? "white" : node.color || DEFAULT_NODE_COLOR }}
-                        />
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium leading-tight">{node.title}</p>
-                          {node.note && (
-                            <p className={`mt-1 text-xs leading-5 ${active ? "text-primary-foreground/80" : "text-muted-foreground"}`}>
-                              {node.note}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <div className="rounded-xl border bg-card p-4 space-y-4">
-            <div className="flex items-center gap-2">
-              <GitBranch className="w-4 h-4 text-primary" />
-              <h2 className="font-semibold">Selected node</h2>
-            </div>
-            {selectedNode ? (
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <label className="text-xs font-medium text-muted-foreground">Title</label>
-                  <Input value={selectedNode.title} onChange={(e) => updateSelectedNode({ title: e.target.value })} />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-medium text-muted-foreground">Note</label>
-                  <Textarea value={selectedNode.note || ""} onChange={(e) => updateSelectedNode({ note: e.target.value })} rows={5} />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-medium text-muted-foreground">Add child branch</label>
-                  <Input value={newChildTitle} onChange={(e) => setNewChildTitle(e.target.value)} placeholder="Child topic title" />
-                  <Textarea value={newChildNote} onChange={(e) => setNewChildNote(e.target.value)} placeholder="Optional note" rows={3} />
-                  <Button type="button" variant="outline" onClick={() => addChildNode()} className="gap-2 w-full">
-                    <Plus className="w-4 h-4" /> Add child
-                  </Button>
-                </div>
-                {selectedNode.parentId !== null && (
-                  <Button type="button" variant="destructive" onClick={deleteSelectedNode} className="gap-2 w-full">
-                    <Trash2 className="w-4 h-4" /> Delete branch
-                  </Button>
-                )}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">Select a node to edit it.</p>
-            )}
-          </div>
-
-          <div className="rounded-xl border bg-card p-4 space-y-3">
-            <h3 className="font-semibold">How to use it</h3>
-            <ul className="space-y-2 text-sm text-muted-foreground list-disc pl-5">
-              <li>Start from the root course node.</li>
-              <li>Add child branches manually to reflect your own understanding.</li>
-              <li>Use AI expansion to generate study subtopics from the selected node.</li>
-              <li>Save the map to keep it in your StudyBridge library.</li>
-            </ul>
+                </ViewportPortal>
+              )}
+            </ReactFlow>
           </div>
         </div>
       </div>
-    </div>
+    </TooltipProvider>
   );
 }

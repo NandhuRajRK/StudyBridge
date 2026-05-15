@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { studybridge } from "@/api/studybridgeClient";
-import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus, Calendar, List, Loader2, Lightbulb, ArrowRight } from "lucide-react";
@@ -10,8 +9,7 @@ import CalendarView from "@/components/planner/CalendarView";
 import { isAfter, isBefore, startOfDay, addDays } from "date-fns";
 import { confirmAndDelete } from "@/lib/deleteEntity";
 import { loadPlannerContext } from "@/lib/aiContext";
-import AiAccessNotice from "@/components/ai/AiAccessNotice";
-import { getDesktopAiNotice, isDesktopAiUnavailable, loadDesktopAiRuntime } from "@/lib/desktopAi";
+import { isDesktopAiUnavailable, loadDesktopAiRuntime } from "@/lib/desktopAi";
 import { useLocale } from "@/lib/locale";
 import { dateKeyToDate, getTaskDateKey } from "@/lib/calendar";
 
@@ -34,13 +32,11 @@ export default function Planner() {
   const [tasks, setTasks] = useState([]);
   const [courses, setCourses] = useState([]);
   const [topics, setTopics] = useState([]);
-  const [materials, setMaterials] = useState([]);
-  const [notes, setNotes] = useState([]);
-  const [sessions, setSessions] = useState([]);
   const [profile, setProfile] = useState(null);
   const [runtime, setRuntime] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showAddTask, setShowAddTask] = useState(false);
+  const [addTaskInitialValues, setAddTaskInitialValues] = useState({});
   const [generatingPlan, setGeneratingPlan] = useState(false);
   const { t } = useLocale();
 
@@ -56,17 +52,9 @@ export default function Planner() {
       studybridge.entities.Topic.list("order", 300),
       studybridge.auth.me(),
     ]);
-    const [studyMaterials, studyNotes, studySessions] = await Promise.all([
-      studybridge.entities.StudyMaterial.list("-created_date", 100),
-      studybridge.entities.Note.list("-created_date", 100),
-      studybridge.entities.StudySession.list("-created_date", 50),
-    ]);
     setTasks(t);
     setCourses(c);
     setTopics(tp);
-    setMaterials(studyMaterials);
-    setNotes(studyNotes);
-    setSessions(studySessions);
     setProfile(p);
     setLoading(false);
   };
@@ -166,6 +154,11 @@ ${context}`,
     if (deleted) setTasks(prev => prev.filter(t => t.id !== taskId));
   };
 
+  const openAddTaskDialog = (initialValues = {}) => {
+    setAddTaskInitialValues(initialValues);
+    setShowAddTask(true);
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -192,128 +185,69 @@ ${context}`,
   const completed = tasks.filter(t => t.status === "completed");
   const nextTask = overdue[0] || todayTasks.find(t => t.status !== "completed") || upcoming[0] || unscheduled[0];
   const aiUnavailable = isDesktopAiUnavailable(runtime);
-  const aiNotice = getDesktopAiNotice(runtime, t);
-  const courseBoard = courses.map(course => {
-    const courseTopics = topics.filter(t => t.course_id === course.id);
-    const courseMaterials = materials.filter(m => m.course_id === course.id);
-    const courseNotes = notes.filter(n => n.course_id === course.id);
-    const courseSessions = sessions.filter(s => s.course_id === course.id);
-    const nextTopic = courseTopics.find(t => t.status !== "completed" && (t.mastery_level || 0) < 70) || courseTopics[0];
-
-    return {
-      course,
-      courseTopics,
-      courseMaterials,
-      courseNotes,
-      courseSessions,
-      nextTopic,
-    };
-  });
 
   return (
-    <div className="p-6 lg:p-8 max-w-6xl mx-auto space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">{t("nav.planner")}</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            {activeTasks.length} active tasks. This is the "what should I do next?" page.
-          </p>
-          {profile && (
-            <p className="text-xs text-muted-foreground mt-1">
-              {profile.full_name || "Student"} {profile.major ? `- ${profile.major}` : ""} {profile.daily_goal_minutes ? `- ${profile.daily_goal_minutes} min/day goal` : ""}
-            </p>
-          )}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={generateStudyPlan} disabled={generatingPlan || aiUnavailable} className="gap-2">
-            {generatingPlan ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lightbulb className="w-4 h-4" />}
-            {generatingPlan ? "Generating..." : "Build actionable plan"}
-          </Button>
-          <Button onClick={() => setShowAddTask(true)} className="gap-2">
-            <Plus className="w-4 h-4" /> Add Task
-          </Button>
-        </div>
-      </div>
-
-      {aiUnavailable && (
-        <AiAccessNotice
-          title="Planner AI is not ready on this desktop"
-          message={aiNotice}
-        />
-      )}
-
-      <section className="bg-card border rounded-xl p-5 space-y-4">
-        <div className="flex items-center justify-between gap-3">
+    <div className="h-full overflow-hidden bg-background">
+      <div className="flex h-full min-h-0 w-full flex-col gap-6 p-6 lg:p-8">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Course Board</h2>
-            <p className="text-sm text-muted-foreground mt-1">All active courses, with materials, notes, sessions, and a next action.</p>
+            <h1 className="text-2xl font-semibold">{t("nav.planner")}</h1>
+            <p className="text-sm text-muted-foreground mt-1">{activeTasks.length} active tasks</p>
           </div>
-          <span className="text-xs text-muted-foreground">{courseBoard.length} active course{courseBoard.length === 1 ? "" : "s"}</span>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={generateStudyPlan} disabled={generatingPlan || aiUnavailable} className="gap-2">
+              {generatingPlan ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lightbulb className="w-4 h-4" />}
+              {generatingPlan ? "Generating..." : "Build actionable plan"}
+            </Button>
+            <Button onClick={() => openAddTaskDialog()} className="gap-2">
+              <Plus className="w-4 h-4" /> Add Task
+            </Button>
+          </div>
         </div>
-        {courseBoard.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Add a course to start building course-specific tasks.</p>
-        ) : (
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {courseBoard.slice(0, profile?.context_course_limit || 6).map(({ course, courseTopics, courseMaterials, courseNotes, courseSessions, nextTopic }) => (
-              <div key={course.id} className="rounded-lg border bg-background p-4 space-y-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h3 className="font-medium leading-tight">{course.title}</h3>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {course.code || "No code"}{course.exam_date ? ` - Exam ${new Date(course.exam_date).toLocaleDateString()}` : ""}
-                    </p>
-                  </div>
-                  <span className="text-xs rounded-full bg-primary/10 text-primary px-2 py-1">{course.overall_progress || 0}%</span>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-                  <span>{courseTopics.length} topics</span>
-                  <span>{courseMaterials.length} materials</span>
-                  <span>{courseNotes.length} notes</span>
-                  <span>{courseSessions.length} sessions</span>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button asChild size="sm" variant="outline">
-                    <Link to={`/courses/${course.id}`}>Open course</Link>
-                  </Button>
-                  {nextTopic && (
-                    <Button asChild size="sm">
-                      <Link to={`/study?course=${course.id}&topic=${nextTopic.id}`}>Continue study</Link>
-                    </Button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
 
-      <NextTaskCard task={nextTask} courses={courses} topics={topics} onToggle={handleToggleTask} />
+        <NextTaskCard task={nextTask} courses={courses} topics={topics} onToggle={handleToggleTask} />
 
-      <Tabs defaultValue="list">
-        <TabsList>
-          <TabsTrigger value="list" className="gap-1.5"><List className="w-3.5 h-3.5" /> List</TabsTrigger>
-          <TabsTrigger value="calendar" className="gap-1.5"><Calendar className="w-3.5 h-3.5" /> Calendar</TabsTrigger>
-        </TabsList>
+        <Tabs defaultValue="list" className="min-h-0 flex-1 flex flex-col">
+          <TabsList className="w-fit">
+            <TabsTrigger value="list" className="gap-1.5"><List className="w-3.5 h-3.5" /> List</TabsTrigger>
+            <TabsTrigger value="calendar" className="gap-1.5"><Calendar className="w-3.5 h-3.5" /> Calendar</TabsTrigger>
+          </TabsList>
 
-        <TabsContent value="list" className="space-y-6 mt-4">
-          {activeTasks.length === 0 && <EmptyPlan onGenerate={generateStudyPlan} generating={generatingPlan} />}
-          {overdue.length > 0 && (
-            <TaskList title="Overdue" tasks={overdue} courses={courses} topics={topics} onToggle={handleToggleTask} onDelete={handleDeleteTask} variant="destructive" />
-          )}
-          <TaskList title="Today" tasks={todayTasks} courses={courses} topics={topics} onToggle={handleToggleTask} onDelete={handleDeleteTask} />
-          <TaskList title="Upcoming" tasks={upcoming} courses={courses} topics={topics} onToggle={handleToggleTask} onDelete={handleDeleteTask} />
-          <TaskList title="Unscheduled" tasks={unscheduled} courses={courses} topics={topics} onToggle={handleToggleTask} onDelete={handleDeleteTask} />
-          {completed.length > 0 && (
-            <TaskList title="Completed" tasks={completed.slice(0, 10)} courses={courses} topics={topics} onToggle={handleToggleTask} onDelete={handleDeleteTask} variant="muted" />
-          )}
-        </TabsContent>
+          <TabsContent value="list" className="space-y-6 mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
+            {activeTasks.length === 0 && <EmptyPlan onGenerate={generateStudyPlan} generating={generatingPlan} />}
+            {overdue.length > 0 && (
+              <TaskList title="Overdue" tasks={overdue} courses={courses} topics={topics} onToggle={handleToggleTask} onDelete={handleDeleteTask} variant="destructive" />
+            )}
+            <TaskList title="Today" tasks={todayTasks} courses={courses} topics={topics} onToggle={handleToggleTask} onDelete={handleDeleteTask} />
+            <TaskList title="Upcoming" tasks={upcoming} courses={courses} topics={topics} onToggle={handleToggleTask} onDelete={handleDeleteTask} />
+            <TaskList title="Unscheduled" tasks={unscheduled} courses={courses} topics={topics} onToggle={handleToggleTask} onDelete={handleDeleteTask} />
+            {completed.length > 0 && (
+              <TaskList title="Completed" tasks={completed.slice(0, 10)} courses={courses} topics={topics} onToggle={handleToggleTask} onDelete={handleDeleteTask} variant="muted" />
+            )}
+          </TabsContent>
 
-        <TabsContent value="calendar" className="mt-4">
-          <CalendarView tasks={tasks} courses={courses} topics={topics} />
-        </TabsContent>
-      </Tabs>
+          <TabsContent value="calendar" className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
+            <CalendarView
+              tasks={tasks}
+              courses={courses}
+              topics={topics}
+              onCreateTaskAtDate={(dateValue) => openAddTaskDialog({ due_date: dateValue })}
+            />
+          </TabsContent>
+        </Tabs>
 
-      <AddTaskDialog open={showAddTask} onClose={() => setShowAddTask(false)} courses={courses} topics={topics} onCreated={loadData} />
+        <AddTaskDialog
+          open={showAddTask}
+          onClose={() => {
+            setShowAddTask(false);
+            setAddTaskInitialValues({});
+          }}
+          courses={courses}
+          topics={topics}
+          onCreated={loadData}
+          initialValues={addTaskInitialValues}
+        />
+      </div>
     </div>
   );
 }
