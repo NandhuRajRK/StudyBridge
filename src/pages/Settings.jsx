@@ -1,15 +1,15 @@
 import { useState, useEffect } from "react";
 import { studybridge } from "@/api/studybridgeClient";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { User, Bell, GraduationCap, Save, Loader2, SlidersHorizontal, Bot, ExternalLink, Terminal, CheckCircle2 } from "lucide-react";
+import { Save, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { isDesktopApp } from "@/lib/runtime";
 import { useLocale } from "@/lib/locale";
+import SettingsProfileTab from "@/components/settings/SettingsProfileTab";
+import SettingsAiRuntimeTab from "@/components/settings/SettingsAiRuntimeTab";
+import SettingsAiContextTab from "@/components/settings/SettingsAiContextTab";
+import SettingsNotificationsTab from "@/components/settings/SettingsNotificationsTab";
 
 const defaultLimits = {
   planner_item_limit: 8,
@@ -527,556 +527,50 @@ export default function Settings() {
         </TabsList>
 
         <TabsContent value="profile" className="mt-0 space-y-6">
-          <Section icon={User} title={t("settings.profile")} id="profile">
-            <div className="space-y-4">
-              <Field label="Full Name">
-                <Input value={form.full_name} onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))} />
-              </Field>
-              <Field label="Email">
-                <Input
-                  type="email"
-                  value={form.email}
-                  onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-                  placeholder="name@university.edu"
-                />
-              </Field>
-              <div className="grid grid-cols-2 gap-4">
-                <Field label="University">
-                  <SearchableOptionInput
-                    listId="settings-university-options"
-                    value={form.university}
-                    onChange={(value) => setForm(f => ({ ...f, university: value }))}
-                    options={UNIVERSITY_OPTIONS}
-                    placeholder="Type to search or enter manually"
-                  />
-                </Field>
-                <Field label="Major">
-                  <SearchableOptionInput
-                    listId="settings-major-options"
-                    value={form.major}
-                    onChange={(value) => setForm(f => ({ ...f, major: value }))}
-                    options={MAJOR_OPTIONS}
-                    placeholder="Type to search or enter manually"
-                  />
-                </Field>
-              </div>
-              <Field label="Academic Year">
-                <Select value={form.year} onValueChange={v => setForm(f => ({ ...f, year: v }))}>
-                  <SelectTrigger><SelectValue placeholder="Select year..." /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="1">Freshman (Year 1)</SelectItem>
-                    <SelectItem value="2">Sophomore (Year 2)</SelectItem>
-                    <SelectItem value="3">Junior (Year 3)</SelectItem>
-                    <SelectItem value="4">Senior (Year 4)</SelectItem>
-                    <SelectItem value="grad">Graduate</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field label={t("settings.language")}>
-                <Select value={form.preferred_language} onValueChange={v => setForm(f => ({ ...f, preferred_language: v }))}>
-                  <SelectTrigger><SelectValue placeholder={t("settings.language")} /></SelectTrigger>
-                  <SelectContent>
-                    {supportedLanguages.map((item) => (
-                      <SelectItem key={item.code} value={item.code}>{item.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  {t("settings.translationNotice")}
-                </p>
-              </Field>
-            </div>
-          </Section>
-
-          <Section icon={GraduationCap} title={t("settings.studyGoals")}>
-            <Field label={`${t("settings.dailyGoal")}: ${form.daily_goal_minutes} minutes`}>
-              <input
-                type="range" min={15} max={300} step={15}
-                value={form.daily_goal_minutes}
-                onChange={e => setForm(f => ({ ...f, daily_goal_minutes: parseInt(e.target.value) }))}
-                className="w-full accent-primary"
-              />
-              <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                <span>15m</span><span>1h</span><span>2h</span><span>3h</span><span>5h</span>
-              </div>
-            </Field>
-          </Section>
+          <SettingsProfileTab
+            t={t}
+            form={form}
+            setForm={setForm}
+            supportedLanguages={supportedLanguages}
+            universityOptions={UNIVERSITY_OPTIONS}
+            majorOptions={MAJOR_OPTIONS}
+          />
         </TabsContent>
 
         <TabsContent value="runtime" className="mt-0 space-y-6">
-          {isDesktop ? (
-            <Section icon={Bot} title={t("settings.aiRuntime")}>
-              <div className="grid gap-4">
-              <Field label={t("settings.aiMode")}>
-                <Select value={aiSettings.mode} onValueChange={async (v) => {
-                  const next = {
-                    ...aiSettings,
-                    mode: normalizeMode(v),
-                    agentProvider: "none",
-                    localModelConsent: v === "local" ? true : aiSettings.localModelConsent,
-                    ollamaUrl: normalizeOllamaUrl(aiSettings.ollamaUrl),
-                    ollamaModel: normalizeOllamaModel(aiSettings.ollamaModel),
-                  };
-                  setOllamaUrlDraft(next.ollamaUrl);
-                  await applyAiSettings(next);
-                }}>
-                  <SelectTrigger><SelectValue placeholder="Choose mode..." /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="codex">Codex CLI</SelectItem>
-                    <SelectItem value="disabled">{t("settings.disabled")}</SelectItem>
-                    <SelectItem value="local">Local AI</SelectItem>
-                    <SelectItem value="cloud">Cloud API keys</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-
-              {aiSettings.mode === "codex" && (
-                <p className="text-sm text-muted-foreground">
-                  Use your local Codex CLI login for desktop AI generation. Local Gemma and cloud API keys remain optional fallbacks.
-                </p>
-              )}
-
-              {aiSettings.mode === "codex" && (
-                <div className="rounded-lg border bg-card p-4 space-y-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <Terminal className="w-4 h-4 text-muted-foreground" />
-                        <p className="font-medium">AI Provider</p>
-                      </div>
-                      <p className="text-sm text-muted-foreground">
-                        StudyBridge uses your local Codex CLI login for OpenAI-backed desktop AI generation. Codex CLI handles login; StudyBridge does not store an OpenAI API key.
-                      </p>
-                    </div>
-                    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs ${
-                      codexStatus.installed ? "bg-emerald-500/10 text-emerald-700" : "bg-amber-500/10 text-amber-700"
-                    }`}>
-                      {codexStatus.installed && <CheckCircle2 className="w-3.5 h-3.5" />}
-                      {codexStatus.installed ? "Codex installed" : "Codex not detected"}
-                    </span>
-                  </div>
-                  <div className="rounded-md bg-muted/50 p-3 text-sm">
-                    {codexStatus.installed ? (
-                      <p><span className="font-medium">Detected:</span> {codexStatus.version || "Codex CLI"}</p>
-                    ) : (
-                      <p className="text-muted-foreground">{codexStatus.error || "Run Check Codex to detect your local CLI."}</p>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      onClick={handleOpenCodexLogin}
-                      disabled={!codexStatus.installed}
-                      className="gap-2"
-                    >
-                      <ExternalLink className="w-4 h-4" />
-                      Login with Codex
-                    </Button>
-                    {!codexStatus.installed && (
-                      <Button type="button" variant="outline" onClick={handleInstallCodex} className="gap-2">
-                        <ExternalLink className="w-4 h-4" />
-                        Install Codex CLI
-                      </Button>
-                    )}
-                    <Button type="button" variant="outline" onClick={handleCheckCodex} disabled={checkingCodex} className="gap-2">
-                      {checkingCodex ? <Loader2 className="w-4 h-4 animate-spin" /> : <Terminal className="w-4 h-4" />}
-                      Check status
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Generation runs hidden in the background with <code>codex exec -m gpt-5.1-codex-mini --skip-git-repo-check --sandbox read-only --color never -</code>.
-                  </p>
-                </div>
-              )}
-
-              {aiSettings.mode === "local" && (
-                <div className="rounded-lg border bg-muted/30 p-4 space-y-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="space-y-1">
-                      <p className="font-medium">Local AI</p>
-                      <p className="text-xs text-muted-foreground">
-                        StudyBridge treats llama.cpp and Ollama as the same local workflow. Pick the backend that is already installed on this machine.
-                      </p>
-                    </div>
-                    <span className="text-xs rounded-full bg-primary/10 text-primary px-2 py-1">
-                      {aiRuntime?.model || aiRuntime?.label || "Auto-selected"}
-                    </span>
-                  </div>
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <Field label="Local backend">
-                      <Select value={aiSettings.localBackend || "llama_cpp"} onValueChange={async (value) => {
-                        const next = {
-                          ...aiSettings,
-                          mode: "local",
-                          localBackend: value,
-                          localModelConsent: true,
-                          ollamaUrl: normalizeOllamaUrl(aiSettings.ollamaUrl),
-                          ollamaModel: normalizeOllamaModel(aiSettings.ollamaModel),
-                        };
-                        setOllamaUrlDraft(next.ollamaUrl);
-                        await applyAiSettings(next);
-                      }}>
-                        <SelectTrigger><SelectValue placeholder="Choose backend..." /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="llama_cpp">llama.cpp Gemma</SelectItem>
-                          <SelectItem value="ollama">Ollama</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                    {aiSettings.localBackend === "ollama" ? (
-                      <>
-                        <Field label="Ollama URL">
-                          <Input
-                            value={ollamaUrlDraft}
-                            onChange={(e) => setOllamaUrlDraft(e.target.value)}
-                            onBlur={async () => {
-                              const normalizedUrl = normalizeOllamaUrl(ollamaUrlDraft);
-                              setOllamaUrlDraft(normalizedUrl);
-                              if (normalizedUrl === (aiSettings.ollamaUrl || DEFAULT_OLLAMA_URL)) return;
-                              await applyAiSettings({
-                                ...aiSettings,
-                                mode: "local",
-                                localBackend: "ollama",
-                                localModelConsent: true,
-                                ollamaUrl: normalizedUrl,
-                                ollamaModel: normalizeOllamaModel(aiSettings.ollamaModel),
-                              });
-                            }}
-                            placeholder="http://127.0.0.1:11434"
-                          />
-                        </Field>
-                        <Field label="Ollama model">
-                          <Select
-                            value={normalizeOllamaModel(aiSettings.ollamaModel)}
-                            onValueChange={async (value) => {
-                              await applyAiSettings({
-                                ...aiSettings,
-                                mode: "local",
-                                localBackend: "ollama",
-                                localModelConsent: true,
-                                ollamaUrl: normalizeOllamaUrl(aiSettings.ollamaUrl),
-                                ollamaModel: normalizeOllamaModel(value),
-                              });
-                            }}
-                          >
-                            <SelectTrigger><SelectValue placeholder="Choose model..." /></SelectTrigger>
-                            <SelectContent>
-                              {OLLAMA_MODEL_OPTIONS.map((option) => (
-                                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <p className="text-xs text-muted-foreground">
-                            {OLLAMA_MODEL_OPTIONS.find((option) => option.value === normalizeOllamaModel(aiSettings.ollamaModel))?.note || "Recommended local model presets"}
-                          </p>
-                        </Field>
-                      </>
-                    ) : (
-                      <div className="rounded-md border bg-card/60 p-3 text-sm text-muted-foreground md:col-span-1">
-                        The built-in Gemma runtime downloads llama.cpp and the selected model automatically when local consent is enabled.
-                      </div>
-                    )}
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    The tutor and agent workflows use the same local path, so Ollama and the built-in runtime behave the same once configured.
-                  </p>
-                  {aiSettings.localBackend === "ollama" && aiRuntime?.status === "missing_provider" && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="w-fit gap-2"
-                      onClick={async () => {
-                        if (!window.studybridgeDesktop?.installOllama) {
-                          toast.error("Ollama installer is unavailable in this build");
-                          return;
-                        }
-                        try {
-                          const result = await window.studybridgeDesktop.installOllama();
-                          if (result?.ok) {
-                            toast.success("Ollama installation started");
-                          } else {
-                            toast.error(result?.error || "Failed to install Ollama");
-                          }
-                          if (window.studybridgeDesktop?.getRuntimeConfig) {
-                            setAiRuntime(await window.studybridgeDesktop.getRuntimeConfig());
-                          }
-                        } catch (error) {
-                          toast.error(error?.message || "Failed to install Ollama");
-                        }
-                      }}
-                    >
-                      <ExternalLink className="w-4 h-4" />
-                      Install Ollama
-                    </Button>
-                  )}
-                </div>
-              )}
-
-              {aiSettings.mode === "cloud" && (
-                <div className="grid gap-4">
-                  <Field label="Cloud provider">
-                    <Select value={aiSettings.cloudProvider || "google"} onValueChange={v => setAiSettings(f => ({ ...f, cloudProvider: v }))}>
-                      <SelectTrigger><SelectValue placeholder="Choose provider..." /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="google">Google Gemini</SelectItem>
-                        <SelectItem value="openai">OpenAI</SelectItem>
-                        <SelectItem value="anthropic">Anthropic</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                  {aiSettings.cloudProvider === "openai" ? (
-                    <>
-                      <Field label="OpenAI API key">
-                        <Input
-                          type="password"
-                          value={aiSettings.openAiApiKey}
-                          onChange={e => setAiSettings(f => ({ ...f, openAiApiKey: e.target.value, clearOpenAiApiKey: false, hasOpenAiApiKey: false }))}
-                          placeholder={aiSettings.hasOpenAiApiKey ? "Stored on this device" : "Paste your OpenAI API key"}
-                        />
-                        {aiSettings.hasOpenAiApiKey && !aiSettings.openAiApiKey && (
-                          <p className="text-xs text-muted-foreground">A key is already saved on this device. Leave this blank to keep it.</p>
-                        )}
-                        {aiSettings.hasOpenAiApiKey && (
-                          <Button type="button" variant="ghost" className="w-fit px-0 text-xs text-destructive hover:text-destructive" onClick={() => handleClearApiKey("openai")}>
-                            Clear saved key
-                          </Button>
-                        )}
-                      </Field>
-                      <Field label="OpenAI model">
-                        <Select
-                          value={normalizeOpenAiModel(aiSettings.openAiModel) || "__default__"}
-                          onValueChange={v => setAiSettings(f => ({ ...f, openAiModel: v === "__default__" ? "" : v }))}
-                        >
-                          <SelectTrigger><SelectValue placeholder="Choose model..." /></SelectTrigger>
-                          <SelectContent>
-                            {OPENAI_MODEL_OPTIONS.map((option) => (
-                              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </Field>
-                      <Button asChild variant="outline" className="w-fit gap-2">
-                        <a href="https://platform.openai.com/docs" target="_blank" rel="noreferrer">
-                          OpenAI docs <ExternalLink className="w-3.5 h-3.5" />
-                        </a>
-                      </Button>
-                    </>
-                  ) : aiSettings.cloudProvider === "anthropic" ? (
-                    <>
-                      <Field label="Anthropic API key">
-                        <Input
-                          type="password"
-                          value={aiSettings.anthropicApiKey}
-                          onChange={e => setAiSettings(f => ({ ...f, anthropicApiKey: e.target.value, clearAnthropicApiKey: false, hasAnthropicApiKey: false }))}
-                          placeholder={aiSettings.hasAnthropicApiKey ? "Stored on this device" : "Paste your Anthropic API key"}
-                        />
-                        {aiSettings.hasAnthropicApiKey && !aiSettings.anthropicApiKey && (
-                          <p className="text-xs text-muted-foreground">A key is already saved on this device. Leave this blank to keep it.</p>
-                        )}
-                        {aiSettings.hasAnthropicApiKey && (
-                          <Button type="button" variant="ghost" className="w-fit px-0 text-xs text-destructive hover:text-destructive" onClick={() => handleClearApiKey("anthropic")}>
-                            Clear saved key
-                          </Button>
-                        )}
-                      </Field>
-                      <Field label="Anthropic model">
-                        <Input
-                          value={aiSettings.anthropicModel}
-                          onChange={e => setAiSettings(f => ({ ...f, anthropicModel: e.target.value }))}
-                          placeholder="claude-sonnet-4-0"
-                        />
-                      </Field>
-                      <Button asChild variant="outline" className="w-fit gap-2">
-                        <a href="https://docs.anthropic.com/" target="_blank" rel="noreferrer">
-                          Anthropic docs <ExternalLink className="w-3.5 h-3.5" />
-                        </a>
-                      </Button>
-                    </>
-                  ) : (
-                    <>
-                      <Field label={t("settings.googleApiKey")}>
-                        <Input
-                          type="password"
-                          value={aiSettings.googleApiKey}
-                          onChange={e => setAiSettings(f => ({ ...f, googleApiKey: e.target.value, clearGoogleApiKey: false, hasGoogleApiKey: false }))}
-                          placeholder={aiSettings.hasGoogleApiKey ? "Stored on this device" : "Paste your Google API key"}
-                        />
-                        {aiSettings.hasGoogleApiKey && !aiSettings.googleApiKey && (
-                          <p className="text-xs text-muted-foreground">A key is already saved on this device. Leave this blank to keep it.</p>
-                        )}
-                        {aiSettings.hasGoogleApiKey && (
-                          <Button type="button" variant="ghost" className="w-fit px-0 text-xs text-destructive hover:text-destructive" onClick={() => handleClearApiKey("google")}>
-                            Clear saved key
-                          </Button>
-                        )}
-                      </Field>
-                      <Field label={t("settings.googleModel")}>
-                        <Select value={aiSettings.googleModel} onValueChange={v => setAiSettings(f => ({ ...f, googleModel: v }))}>
-                          <SelectTrigger><SelectValue placeholder="Choose model..." /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash</SelectItem>
-                            <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </Field>
-                      <Button asChild variant="outline" className="w-fit gap-2">
-                        <a href="https://ai.google.dev/gemini-api/docs/api-key" target="_blank" rel="noreferrer">
-                          {t("settings.googleApiKeyDocs")} <ExternalLink className="w-3.5 h-3.5" />
-                        </a>
-                      </Button>
-                    </>
-                  )}
-                </div>
-              )}
-
-              <div className={`grid gap-4 ${aiSettings.mode === "cloud" ? "md:grid-cols-2" : ""}`}>
-                <div className="rounded-lg border bg-muted/10 p-4 space-y-3">
-                  <div>
-                    <p className="font-medium">{t("settings.safetyLimits")}</p>
-                    <p className="text-xs text-muted-foreground">
-                      Fixed guardrails that stop runaway prompts or accidental request loops.
-                    </p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field label={t("settings.maxPromptChars")}>
-                      <Input
-                        type="number"
-                        value={aiSettings.safetyLimits?.maxPromptChars || defaultAiSettings.safetyLimits.maxPromptChars}
-                        disabled
-                        className="opacity-70"
-                      />
-                    </Field>
-                    <Field label={t("settings.minRequestIntervalMs")}>
-                      <Input
-                        type="number"
-                        value={aiSettings.safetyLimits?.minRequestIntervalMs || defaultAiSettings.safetyLimits.minRequestIntervalMs}
-                        disabled
-                        className="opacity-70"
-                      />
-                    </Field>
-                  </div>
-                </div>
-
-                {aiSettings.mode === "cloud" && (
-                  <div className="rounded-lg border bg-muted/10 p-4 space-y-3">
-                    <div>
-                      <p className="font-medium">{t("settings.cloudBudget")}</p>
-                      <p className="text-xs text-muted-foreground">
-                        Adjust this if your API quota is higher. Safety limits stay on.
-                      </p>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <Field label={t("settings.dailyRequestLimit")}>
-                        <Input
-                          type="number"
-                          min={1}
-                          max={1000}
-                          value={aiSettings.cloudBudget?.dailyRequestLimit || defaultAiSettings.cloudBudget.dailyRequestLimit}
-                          onChange={e => setAiSettings(f => ({
-                            ...f,
-                            cloudBudget: { ...f.cloudBudget, dailyRequestLimit: parseInt(e.target.value || "0", 10) || defaultAiSettings.cloudBudget.dailyRequestLimit },
-                          }))}
-                        />
-                      </Field>
-                      <Field label={t("settings.dailyPromptCharLimit")}>
-                        <Input
-                          type="number"
-                          min={1000}
-                          max={1000000}
-                          value={aiSettings.cloudBudget?.dailyPromptCharLimit || defaultAiSettings.cloudBudget.dailyPromptCharLimit}
-                          onChange={e => setAiSettings(f => ({
-                            ...f,
-                            cloudBudget: { ...f.cloudBudget, dailyPromptCharLimit: parseInt(e.target.value || "0", 10) || defaultAiSettings.cloudBudget.dailyPromptCharLimit },
-                          }))}
-                        />
-                      </Field>
-                      <Field label={t("settings.dailyResponseCharLimit")}>
-                        <Input
-                          type="number"
-                          min={1000}
-                          max={1000000}
-                          value={aiSettings.cloudBudget?.dailyResponseCharLimit || defaultAiSettings.cloudBudget.dailyResponseCharLimit}
-                          onChange={e => setAiSettings(f => ({
-                            ...f,
-                            cloudBudget: { ...f.cloudBudget, dailyResponseCharLimit: parseInt(e.target.value || "0", 10) || defaultAiSettings.cloudBudget.dailyResponseCharLimit },
-                          }))}
-                        />
-                      </Field>
-                    </div>
-                  </div>
-                )}
-              </div>
-              </div>
-            </Section>
-          ) : (
-            <Section icon={Bot} title={t("settings.aiRuntime")}>
-              <p className="text-sm text-muted-foreground">
-                This build is desktop-only. AI settings are available inside the Electron app.
-              </p>
-              <p className="text-sm">
-                {t("settings.googleApiKeyDocs")}:{" "}
-                <a className="text-primary underline underline-offset-4" href="https://ai.google.dev/gemini-api/docs/api-key" target="_blank" rel="noreferrer">
-                  ai.google.dev/gemini-api/docs/api-key
-                </a>
-              </p>
-            </Section>
-          )}
+          <SettingsAiRuntimeTab
+            t={t}
+            isDesktop={isDesktop}
+            aiSettings={aiSettings}
+            setAiSettings={setAiSettings}
+            normalizeMode={normalizeMode}
+            normalizeOllamaUrl={normalizeOllamaUrl}
+            normalizeOllamaModel={normalizeOllamaModel}
+            applyAiSettings={applyAiSettings}
+            setOllamaUrlDraft={setOllamaUrlDraft}
+            codexStatus={codexStatus}
+            checkingCodex={checkingCodex}
+            handleOpenCodexLogin={handleOpenCodexLogin}
+            handleInstallCodex={handleInstallCodex}
+            handleCheckCodex={handleCheckCodex}
+            aiRuntime={aiRuntime}
+            setAiRuntime={setAiRuntime}
+            handleClearApiKey={handleClearApiKey}
+            normalizeOpenAiModel={normalizeOpenAiModel}
+            openAiModelOptions={OPENAI_MODEL_OPTIONS}
+            ollamaModelOptions={OLLAMA_MODEL_OPTIONS}
+            defaultOllamaUrl={DEFAULT_OLLAMA_URL}
+            defaultAiSettings={defaultAiSettings}
+            toast={toast}
+          />
         </TabsContent>
 
         <TabsContent value="context" className="mt-0 space-y-6">
-          <Section icon={SlidersHorizontal} title={t("settings.aiContextLimits")}>
-            <p className="text-sm text-muted-foreground">
-              These limits control how much course data the AI sees and how many items it tries to generate at once.
-            </p>
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Planner items">
-                <Input type="number" min={1} max={20} value={form.planner_item_limit} onChange={e => setForm(f => ({ ...f, planner_item_limit: parseInt(e.target.value || "0") || 1 }))} />
-              </Field>
-              <Field label="Courses in context">
-                <Input type="number" min={1} max={20} value={form.context_course_limit} onChange={e => setForm(f => ({ ...f, context_course_limit: parseInt(e.target.value || "0") || 1 }))} />
-              </Field>
-              <Field label="Topics per course">
-                <Input type="number" min={1} max={20} value={form.context_topic_limit} onChange={e => setForm(f => ({ ...f, context_topic_limit: parseInt(e.target.value || "0") || 1 }))} />
-              </Field>
-              <Field label="Materials per course">
-                <Input type="number" min={1} max={20} value={form.context_material_limit} onChange={e => setForm(f => ({ ...f, context_material_limit: parseInt(e.target.value || "0") || 1 }))} />
-              </Field>
-              <Field label="Notes per course">
-                <Input type="number" min={1} max={20} value={form.context_note_limit} onChange={e => setForm(f => ({ ...f, context_note_limit: parseInt(e.target.value || "0") || 1 }))} />
-              </Field>
-              <Field label="Sessions per course">
-                <Input type="number" min={1} max={20} value={form.context_session_limit} onChange={e => setForm(f => ({ ...f, context_session_limit: parseInt(e.target.value || "0") || 1 }))} />
-              </Field>
-              <Field label="Tasks per course">
-                <Input type="number" min={1} max={20} value={form.context_task_limit} onChange={e => setForm(f => ({ ...f, context_task_limit: parseInt(e.target.value || "0") || 1 }))} />
-              </Field>
-            </div>
-          </Section>
+          <SettingsAiContextTab t={t} form={form} setForm={setForm} />
         </TabsContent>
 
         <TabsContent value="notifications" className="mt-0 space-y-6">
-          <Section icon={Bell} title={t("settings.notifications")}>
-            <div className="space-y-4">
-              <ToggleRow
-                label={t("settings.studyReminders")}
-                description="Daily reminders to study"
-                checked={notifications.study_reminders}
-                onChange={v => setNotifications(n => ({ ...n, study_reminders: v }))}
-              />
-              <ToggleRow
-                label={t("settings.taskDue")}
-                description="Reminders when tasks are due soon"
-                checked={notifications.task_due}
-                onChange={v => setNotifications(n => ({ ...n, task_due: v }))}
-              />
-              <ToggleRow
-                label={t("settings.weeklySummary")}
-                description="Weekly email with your progress"
-                checked={notifications.weekly_summary}
-                onChange={v => setNotifications(n => ({ ...n, weekly_summary: v }))}
-              />
-            </div>
-          </Section>
+          <SettingsNotificationsTab t={t} notifications={notifications} setNotifications={setNotifications} />
         </TabsContent>
       </Tabs>
         </div>
@@ -1088,60 +582,6 @@ export default function Settings() {
           </Button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function Section({ icon: Icon, title, children, id }) {
-  return (
-    <div id={id} className="space-y-4 scroll-mt-24">
-      <div className="flex items-center gap-2">
-        <Icon className="w-4 h-4 text-muted-foreground" />
-        <h2 className="font-semibold text-sm uppercase tracking-wider text-muted-foreground">{title}</h2>
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function Field({ label, children }) {
-  return (
-    <div className="space-y-1.5">
-      <Label>{label}</Label>
-      {children}
-    </div>
-  );
-}
-
-function SearchableOptionInput({ listId, value, onChange, options, placeholder }) {
-  return (
-    <div className="space-y-1.5">
-      <Input
-        list={listId}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
-      />
-      <datalist id={listId}>
-        {options.map((option) => (
-          <option key={option} value={option} />
-        ))}
-      </datalist>
-      <p className="text-xs text-muted-foreground">
-        Type to search suggestions, or keep typing and press Enter to save your own value.
-      </p>
-    </div>
-  );
-}
-
-function ToggleRow({ label, description, checked, onChange }) {
-  return (
-    <div className="flex items-center justify-between">
-      <div>
-        <p className="text-sm font-medium">{label}</p>
-        <p className="text-xs text-muted-foreground">{description}</p>
-      </div>
-      <Switch checked={checked} onCheckedChange={onChange} />
     </div>
   );
 }

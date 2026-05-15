@@ -6,25 +6,25 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ArrowRight, BookOpen, Brain, Clock, History, Layers3, Loader2, MessageSquare, PanelRightClose, PanelRightOpen, Paperclip, Pause, Plus, Send, Sparkles, Square, Wand2 } from "lucide-react";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ArrowRight, BookOpen, Brain, Layers3, MessageSquare, Sparkles, Wand2 } from "lucide-react";
 import { buildStudyModeGuidance, loadStudyContextBundle } from "@/lib/aiContext";
 import { executeStudyActions, getRecoverablePendingActions, isPendingActionApproval, isPendingActionCancellation, runStudyTurn } from "@/lib/aiActions";
 import { listAIConversations, loadAIConversation, saveAIAnswer, saveAIConversation } from "@/lib/aiConversations";
 import { isDesktopAiUnavailable, loadDesktopAiRuntime } from "@/lib/desktopAi";
 import { toast } from "@/components/ui/use-toast";
-import MarkdownContent from "@/components/ui/markdown-content";
-import PendingActionsCard from "@/components/ai/PendingActionsCard";
 import StudySummary from "@/components/study/StudySummary";
 import StudyFlashcards from "@/components/study/StudyFlashcards";
 import StudyQuiz from "@/components/study/StudyQuiz";
 import StudyNotes from "@/components/study/StudyNotes";
-import ReviewModePanel from "@/components/study/ReviewModePanel";
 import MaterialUploader from "@/components/courses/MaterialUploader";
 import { buildReviewOutcomePlan, buildReviewTaskPayload, getReviewTasks, normalizeConfidence, normalizeSourceIds, shouldPersistReviewTask, sortReviewTasks } from "@/lib/studyReview";
 import RichTextEditor from "@/components/ui/rich-text-editor";
 import { normalizeRichTextInput } from "@/lib/richText";
 import MindMap from "@/pages/MindMap";
+import SessionCompletionModal from "@/components/study/SessionCompletionModal";
+import SessionHeader from "@/components/study/SessionHeader";
+import StudyTutorPanel from "@/components/study/StudyTutorPanel";
 
 const WORKBENCH_SOURCE = "study_workbench";
 const WORKBENCH_STATE_KEY = "studybridge:workbench-state:v1";
@@ -1684,41 +1684,15 @@ Return as JSON with this structure:
           </div>
         ) : (
           <>
-            <header className="flex items-center justify-between rounded-3xl border border-border/60 bg-card px-4 py-3 shadow-sm">
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Clock className="h-4 w-4" />
-                <span className="text-xs">Session timer</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <p className="font-mono text-2xl font-semibold tabular-nums">{timerLabel}</p>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => setTimerPaused((value) => !value)}
-                  disabled={session?.status !== "active" || workspaceBusy}
-                  aria-label={timerPaused ? "Resume session timer" : "Pause session timer"}
-                >
-                  <Pause className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="destructive"
-                  size="icon"
-                  onClick={() => openSessionCompletionDialog({ reason: "manual_stop" })}
-                  disabled={session?.status !== "active" || workspaceBusy}
-                  aria-label="Stop study session"
-                >
-                  <Square className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleExitWorkspace}
-                  disabled={workspaceBusy}
-                >
-                  Exit
-                </Button>
-              </div>
-            </header>
+            <SessionHeader
+              timerLabel={timerLabel}
+              timerPaused={timerPaused}
+              onTogglePause={() => setTimerPaused((value) => !value)}
+              onStop={() => openSessionCompletionDialog({ reason: "manual_stop" })}
+              onExit={handleExitWorkspace}
+              isSessionActive={session?.status === "active"}
+              workspaceBusy={workspaceBusy}
+            />
 
             <div className={`grid h-full min-h-0 flex-1 gap-4 ${chatSidebarOpen ? "xl:grid-cols-[minmax(0,1fr)_430px]" : "xl:grid-cols-[minmax(0,1fr)_56px]"}`}>
               <main className="flex min-h-0 flex-col overflow-hidden">
@@ -1906,212 +1880,50 @@ Return as JSON with this structure:
                 </div>
               </main>
 
-              <aside className={`flex min-h-0 flex-col rounded-3xl border border-border/60 bg-card shadow-sm ${chatSidebarOpen ? "" : "w-[56px] shrink-0"}`}>
-                <div className={`flex items-center gap-2 border-b px-3 py-2 ${chatSidebarOpen ? "justify-between" : "justify-center"}`}>
-                  {chatSidebarOpen && (
-                    <div>
-                      <p className="text-xs text-muted-foreground">{reviewModeActive ? "Review mode" : "Tutor chat"}</p>
-                      <h2 className="mt-1 max-w-[260px] truncate text-base font-semibold">
-                        {reviewModeActive ? (reviewTask?.title || "Scheduled follow-up") : (selectedTopic ? selectedTopic.title : "Pick a topic to start")}
-                      </h2>
-                    </div>
-                  )}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setChatSidebarOpen((value) => !value)}
-                    aria-label={chatSidebarOpen ? "Collapse tutor chat" : "Expand tutor chat"}
-                  >
-                    {chatSidebarOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
-                  </Button>
-                </div>
-
-                {chatSidebarOpen ? (
-                  <>
-                    <div className="border-b px-3 py-2">
-                      <Select
-                        value={activeConversation?.id || "recent"}
-                        onValueChange={(value) => {
-                          if (value === "recent" || conversationLocked) return;
-                          const conversation = conversations.find((item) => item.id === value);
-                          if (conversation) {
-                            loadConversation(conversation.id).catch((error) => console.error("Failed to load conversation", error));
-                          }
-                        }}
-                        disabled={conversationLocked || reviewModeActive || conversations.length === 0}
-                      >
-                        <SelectTrigger className="w-full">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <History className="h-3.5 w-3.5 text-muted-foreground" />
-                            <SelectValue placeholder="Recent chats" />
-                          </div>
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="recent" disabled>
-                            Recent chats
-                          </SelectItem>
-                          {conversations.map((conversation) => (
-                            <SelectItem key={conversation.id} value={conversation.id}>
-                              <span className="block max-w-[260px] truncate">
-                                {conversation.title || conversation.context || "Study chat"}
-                              </span>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3">
-                      <div className="mx-auto flex max-w-3xl flex-col gap-4">
-                        {reviewModeActive ? (
-                          <>
-                            <ReviewModePanel
-                              task={reviewTask}
-                              queueCount={dueReviewQueue.length}
-                              sourceCatalog={reviewTask?.review_source_catalog?.length > 0 ? reviewTask.review_source_catalog : generatedContent.sourceCatalog || []}
-                              confidence={reviewConfidence}
-                              revealed={reviewAnswerRevealed}
-                              busy={loading || generatingContent}
-                              onConfidenceChange={(value) => setReviewConfidence(normalizeConfidence(value, 3))}
-                              onRevealToggle={() => setReviewAnswerRevealed((value) => !value)}
-                              onMarkCorrect={() => {
-                                if (!reviewTask) return;
-                                void completeReviewAttempt({ task: reviewTask, outcome: "correct", confidence: reviewConfidence });
-                              }}
-                              onMarkIncorrect={() => {
-                                if (!reviewTask) return;
-                                void completeReviewAttempt({ task: reviewTask, outcome: "incorrect", confidence: reviewConfidence });
-                              }}
-                              onStartWorkedExample={() => startWorkedExampleRetry(reviewTask)}
-                              onExit={() => exitReviewMode(true)}
-                            />
-
-                            {pendingActions.length > 0 && (
-                              <PendingActionsCard
-                                courseTitle={selectedCourse?.title}
-                                actions={pendingActions}
-                                onApprove={() => applyPendingActions()}
-                                onCancel={() => cancelPendingActions()}
-                                busy={loading}
-                              />
-                            )}
-                          </>
-                        ) : (
-                          <>
-                            {messages.length === 0 && (
-                              <div className="rounded-3xl border bg-gradient-to-br from-primary/5 via-background to-transparent p-6">
-                                <div className="flex items-start gap-4">
-                                  <div className="rounded-2xl bg-primary/10 p-3 text-primary">
-                                    <Brain className="h-6 w-6" />
-                                  </div>
-                                  <div className="space-y-2">
-                                    <h3 className="text-lg font-semibold">Build the study session from here</h3>
-                                    <p className="max-w-2xl text-sm text-muted-foreground">
-                                      Click Start in setup to generate a summary, flashcards, and quiz for this topic, then continue through tutor chat.
-                                    </p>
-                                    <div className="flex flex-wrap gap-2 pt-2">
-                                      {QUICK_PROMPTS.map((action) => {
-                                        const Icon = action.icon;
-                                        return (
-                                          <Button
-                                            key={action.label}
-                                            type="button"
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={() => sendMessage(action.prompt)}
-                                            disabled={!session?.id || loading || generatingContent || aiUnavailable || !workspaceReady}
-                                            className="gap-2"
-                                          >
-                                            <Icon className="h-3.5 w-3.5" />
-                                            {action.label}
-                                          </Button>
-                                        );
-                                      })}
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-
-                            {messages.map((message, index) => (
-                              <div key={`${message.created_at || index}-${index}`} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
-                                <div className={`max-w-[92%] rounded-3xl border px-4 py-3 shadow-sm ${message.role === "user" ? "rounded-br-md bg-primary text-primary-foreground border-primary/20" : "rounded-bl-md bg-background"}`}>
-                                  {message.role === "user" ? (
-                                    <p className="text-sm leading-6">{message.content}</p>
-                                  ) : (
-                                    <div className="space-y-2">
-                                      <MarkdownContent>{message.content}</MarkdownContent>
-                                      <button
-                                        type="button"
-                                        onClick={() => saveAnswer(message, index)}
-                                        className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-primary"
-                                      >
-                                        <Plus className="h-3 w-3" />
-                                        Save answer
-                                      </button>
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            ))}
-
-                            {pendingActions.length > 0 && (
-                              <PendingActionsCard
-                                courseTitle={selectedCourse?.title}
-                                actions={pendingActions}
-                                onApprove={() => applyPendingActions()}
-                                onCancel={() => cancelPendingActions()}
-                                busy={loading}
-                              />
-                            )}
-
-                            {(generatingContent || loading) && (
-                              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                                <span>{generatingContent ? "Preparing artifacts..." : "Thinking with your StudyBridge context..."}</span>
-                              </div>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="border-t bg-background/80 px-3 py-3">
-                      <form
-                        onSubmit={(event) => {
-                          event.preventDefault();
-                          sendMessage(input);
-                        }}
-                        className="flex items-center gap-2"
-                      >
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          onClick={() => setShowAttachMaterial(true)}
-                          disabled={!selectedCourse?.id || loading || generatingContent}
-                          aria-label="Attach study material"
-                        >
-                          <Paperclip className="h-4 w-4" />
-                        </Button>
-                        <Input
-                          value={input}
-                          onChange={(event) => setInput(event.target.value)}
-                          placeholder={reviewModeActive ? "Exit review mode to continue the tutor chat" : workspaceReady ? "Ask a question or request a write action..." : "Select a course and topic first"}
-                          disabled={reviewModeActive || !session?.id || loading || generatingContent || aiUnavailable || !workspaceReady}
-                          className="flex-1"
-                        />
-                        <Button type="submit" disabled={reviewModeActive || !input.trim() || !session?.id || loading || generatingContent || aiUnavailable || !workspaceReady} size="icon">
-                          <Send className="h-4 w-4" />
-                        </Button>
-                      </form>
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex-1" />
-                )}
-              </aside>
+              <StudyTutorPanel
+                chatSidebarOpen={chatSidebarOpen}
+                onToggleSidebar={() => setChatSidebarOpen((value) => !value)}
+                reviewModeActive={reviewModeActive}
+                reviewTask={reviewTask}
+                selectedTopic={selectedTopic}
+                activeConversation={activeConversation}
+                conversationLocked={conversationLocked}
+                conversations={conversations}
+                loadConversation={loadConversation}
+                scrollRef={scrollRef}
+                dueReviewQueue={dueReviewQueue}
+                generatedContent={generatedContent}
+                reviewConfidence={reviewConfidence}
+                reviewAnswerRevealed={reviewAnswerRevealed}
+                loading={loading}
+                generatingContent={generatingContent}
+                onReviewConfidenceChange={(value) => setReviewConfidence(normalizeConfidence(value, 3))}
+                onReviewRevealToggle={() => setReviewAnswerRevealed((value) => !value)}
+                onMarkReviewCorrect={() => {
+                  if (!reviewTask) return;
+                  void completeReviewAttempt({ task: reviewTask, outcome: "correct", confidence: reviewConfidence });
+                }}
+                onMarkReviewIncorrect={() => {
+                  if (!reviewTask) return;
+                  void completeReviewAttempt({ task: reviewTask, outcome: "incorrect", confidence: reviewConfidence });
+                }}
+                onStartWorkedExample={() => startWorkedExampleRetry(reviewTask)}
+                onExitReviewMode={() => exitReviewMode(true)}
+                pendingActions={pendingActions}
+                selectedCourse={selectedCourse}
+                onApprovePendingActions={() => applyPendingActions()}
+                onCancelPendingActions={() => cancelPendingActions()}
+                messages={messages}
+                quickPrompts={QUICK_PROMPTS}
+                sendMessage={sendMessage}
+                session={session}
+                aiUnavailable={aiUnavailable}
+                workspaceReady={workspaceReady}
+                saveAnswer={saveAnswer}
+                input={input}
+                setInput={setInput}
+                onAttachMaterial={() => setShowAttachMaterial(true)}
+              />
             </div>
           </>
         )}
@@ -2132,66 +1944,19 @@ Return as JSON with this structure:
           }}
         />
 
-        <Dialog open={completionDialogOpen} onOpenChange={setCompletionDialogOpen}>
-          <DialogContent
-            className="sm:max-w-md"
-            onPointerDownOutside={(event) => event.preventDefault()}
-            onInteractOutside={(event) => event.preventDefault()}
-            onEscapeKeyDown={(event) => event.preventDefault()}
-          >
-            <DialogHeader>
-              <DialogTitle>Session complete</DialogTitle>
-              <DialogDescription>
-                Record your confidence now and choose whether to continue with another timed session.
-              </DialogDescription>
-            </DialogHeader>
-
-            <form onSubmit={submitSessionCompletion} className="space-y-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="session-confidence-after">Confidence now (1-5)</Label>
-                <Input
-                  id="session-confidence-after"
-                  type="number"
-                  min="1"
-                  max="5"
-                  value={completionConfidenceDraft}
-                  onChange={(event) => setCompletionConfidenceDraft(event.target.value)}
-                />
-              </div>
-
-              <div className="rounded-xl border bg-muted/20 p-3 space-y-3">
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={completionRestartRequested}
-                    onChange={(event) => setCompletionRestartRequested(event.target.checked)}
-                  />
-                  Start another session now
-                </label>
-
-                {completionRestartRequested && (
-                  <div className="space-y-1.5">
-                    <Label htmlFor="session-restart-minutes">Next session minutes</Label>
-                    <Input
-                      id="session-restart-minutes"
-                      type="number"
-                      min="1"
-                      max="180"
-                      value={completionRestartMinutes}
-                      onChange={(event) => setCompletionRestartMinutes(event.target.value)}
-                    />
-                  </div>
-                )}
-              </div>
-
-              <DialogFooter>
-                <Button type="submit" disabled={loading}>
-                  {loading ? "Saving..." : completionReason === "timer_elapsed" ? "Finish session" : "Save and finish"}
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
+        <SessionCompletionModal
+          open={completionDialogOpen}
+          onOpenChange={setCompletionDialogOpen}
+          completionReason={completionReason}
+          completionConfidenceDraft={completionConfidenceDraft}
+          onCompletionConfidenceDraftChange={setCompletionConfidenceDraft}
+          completionRestartRequested={completionRestartRequested}
+          onCompletionRestartRequestedChange={setCompletionRestartRequested}
+          completionRestartMinutes={completionRestartMinutes}
+          onCompletionRestartMinutesChange={setCompletionRestartMinutes}
+          onSubmit={submitSessionCompletion}
+          loading={loading}
+        />
 
         <Dialog open={manualCardDialogOpen} onOpenChange={setManualCardDialogOpen}>
           <DialogContent className="sm:max-w-md">
