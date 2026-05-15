@@ -85,15 +85,30 @@ function mergeConfig(config = {}) {
       safetyLimits: {
         ...structuredClone(DEFAULT_CONFIG.ai.safetyLimits),
         ...safetyLimits,
-        maxPromptChars: safetyLimits.maxPromptChars ?? legacyRateLimits.maxPromptChars ?? DEFAULT_CONFIG.ai.safetyLimits.maxPromptChars,
-        minRequestIntervalMs: safetyLimits.minRequestIntervalMs ?? legacyRateLimits.minRequestIntervalMs ?? DEFAULT_CONFIG.ai.safetyLimits.minRequestIntervalMs,
+        maxPromptChars:
+          safetyLimits.maxPromptChars ??
+          legacyRateLimits.maxPromptChars ??
+          DEFAULT_CONFIG.ai.safetyLimits.maxPromptChars,
+        minRequestIntervalMs:
+          safetyLimits.minRequestIntervalMs ??
+          legacyRateLimits.minRequestIntervalMs ??
+          DEFAULT_CONFIG.ai.safetyLimits.minRequestIntervalMs,
       },
       cloudBudget: {
         ...structuredClone(DEFAULT_CONFIG.ai.cloudBudget),
         ...cloudBudget,
-        dailyRequestLimit: cloudBudget.dailyRequestLimit ?? legacyRateLimits.dailyRequestLimit ?? DEFAULT_CONFIG.ai.cloudBudget.dailyRequestLimit,
-        dailyPromptCharLimit: cloudBudget.dailyPromptCharLimit ?? legacyRateLimits.dailyPromptCharLimit ?? DEFAULT_CONFIG.ai.cloudBudget.dailyPromptCharLimit,
-        dailyResponseCharLimit: cloudBudget.dailyResponseCharLimit ?? legacyRateLimits.dailyResponseCharLimit ?? DEFAULT_CONFIG.ai.cloudBudget.dailyResponseCharLimit,
+        dailyRequestLimit:
+          cloudBudget.dailyRequestLimit ??
+          legacyRateLimits.dailyRequestLimit ??
+          DEFAULT_CONFIG.ai.cloudBudget.dailyRequestLimit,
+        dailyPromptCharLimit:
+          cloudBudget.dailyPromptCharLimit ??
+          legacyRateLimits.dailyPromptCharLimit ??
+          DEFAULT_CONFIG.ai.cloudBudget.dailyPromptCharLimit,
+        dailyResponseCharLimit:
+          cloudBudget.dailyResponseCharLimit ??
+          legacyRateLimits.dailyResponseCharLimit ??
+          DEFAULT_CONFIG.ai.cloudBudget.dailyResponseCharLimit,
       },
       cloudUsage: {
         ...structuredClone(DEFAULT_CONFIG.ai.cloudUsage),

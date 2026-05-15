@@ -2,8 +2,10 @@ const { spawn } = require("node:child_process");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const os = require("node:os");
+const crypto = require("node:crypto");
 
-const RELEASES_URL = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest";
+const RELEASES_URL =
+  "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest";
 const LOCAL_HOST = "127.0.0.1";
 const LOCAL_PORT = 8080;
 
@@ -12,7 +14,7 @@ function shellQuote(value) {
 }
 
 function getHardwarePreset() {
-  const totalMemoryGb = os.totalmem() / (1024 ** 3);
+  const totalMemoryGb = os.totalmem() / 1024 ** 3;
 
   if (totalMemoryGb >= 32) {
     return {
@@ -69,17 +71,17 @@ async function fetchLatestRelease() {
 }
 
 function pickBinaryAsset(assets) {
-  const patterns = process.arch === "arm64"
-    ? [
-        /llama-.*bin-win-arm64\.zip$/i,
-        /cudart-llama-bin-win-cuda-.*-arm64\.zip$/i,
-      ]
-    : [
-        /llama-.*bin-win-avx2-x64\.zip$/i,
-        /llama-.*bin-win-cpu-x64\.zip$/i,
-      ];
+  const patterns =
+    process.arch === "arm64"
+      ? [
+          /llama-.*bin-win-arm64\.zip$/i,
+          /cudart-llama-bin-win-cuda-.*-arm64\.zip$/i,
+        ]
+      : [/llama-.*bin-win-avx2-x64\.zip$/i, /llama-.*bin-win-cpu-x64\.zip$/i];
 
-  return assets.find((asset) => patterns.some((pattern) => pattern.test(asset.name)));
+  return assets.find((asset) =>
+    patterns.some((pattern) => pattern.test(asset.name)),
+  );
 }
 
 async function downloadFile(url, destinationPath) {
@@ -95,6 +97,97 @@ async function downloadFile(url, destinationPath) {
 
   const buffer = Buffer.from(await response.arrayBuffer());
   await fs.writeFile(destinationPath, buffer);
+}
+
+async function downloadText(url) {
+  const response = await fetch(url, {
+    headers: { "User-Agent": "StudyBridge" },
+  });
+  if (!response.ok)
+    throw new Error(`Failed to download ${url}: ${response.status}`);
+  return await response.text();
+}
+
+function computeFileSha256(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash("sha256");
+    const stream = require("node:fs").createReadStream(filePath);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("end", () => resolve(hash.digest("hex")));
+    stream.on("error", reject);
+  });
+}
+
+function parseChecksums(text) {
+  const entries = [];
+  const lines = String(text || "").split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    // Common format: <hash>  <filename>
+    const m = trimmed.match(/^([a-fA-F0-9]{64})\s+\*?(.+)$/);
+    if (m) {
+      entries.push({ hash: m[1].toLowerCase(), file: m[2] });
+      continue;
+    }
+    // Some files use 'sha256(filename)= <hash>'
+    const m2 = trimmed.match(/sha256\(([^)]+)\)\s*=\s*([a-fA-F0-9]{64})/i);
+    if (m2) {
+      entries.push({ hash: m2[2].toLowerCase(), file: m2[1] });
+      continue;
+    }
+    // Fallback: line that is just a 64-char hash
+    const m3 = trimmed.match(/^([a-fA-F0-9]{64})$/);
+    if (m3) {
+      entries.push({ hash: m3[1].toLowerCase(), file: null });
+      continue;
+    }
+  }
+  return entries;
+}
+
+async function verifyChecksumForAsset(release, asset, zipPath) {
+  const assets = release.assets || [];
+  const checksumAsset = assets.find((a) =>
+    /sha256|checksums|sha256sum|sha256sums|SHA256SUMS/i.test(a.name),
+  );
+  if (!checksumAsset) {
+    if (process.env.SKIP_LLAMA_CHECKSUM === "1") return true;
+    throw new Error(
+      "No checksum asset found in release; aborting download. Set SKIP_LLAMA_CHECKSUM=1 to bypass verification.",
+    );
+  }
+
+  const text = await downloadText(checksumAsset.browser_download_url);
+  const entries = parseChecksums(text);
+  if (!entries.length) {
+    if (process.env.SKIP_LLAMA_CHECKSUM === "1") return true;
+    throw new Error("Checksum file did not contain any entries.");
+  }
+
+  // Prefer an entry that references the asset name
+  let expected = entries.find((e) => e.file && e.file.includes(asset.name));
+  if (!expected) {
+    // If there's only one entry with null file, use it
+    const single = entries.length === 1 && !entries[0].file ? entries[0] : null;
+    if (single) expected = single;
+  }
+
+  if (!expected) {
+    if (process.env.SKIP_LLAMA_CHECKSUM === "1") return true;
+    throw new Error(
+      "Could not find a checksum entry matching the downloaded asset.",
+    );
+  }
+
+  const actual = await computeFileSha256(zipPath);
+  if (actual.toLowerCase() !== expected.hash.toLowerCase()) {
+    throw new Error(
+      `Checksum mismatch for ${asset.name}: expected ${expected.hash}, got ${actual}`,
+    );
+  }
+
+  return true;
 }
 
 async function expandArchive(zipPath, destinationDir) {
@@ -136,7 +229,10 @@ async function findFileRecursive(rootDir, fileName) {
 
     for (const entry of entries) {
       const fullPath = path.join(current, entry.name);
-      if (entry.isFile() && entry.name.toLowerCase() === fileName.toLowerCase()) {
+      if (
+        entry.isFile() &&
+        entry.name.toLowerCase() === fileName.toLowerCase()
+      ) {
         return fullPath;
       }
       if (entry.isDirectory()) {
@@ -177,7 +273,9 @@ async function ensureLlamaBinary(app) {
   const release = await fetchLatestRelease();
   const asset = pickBinaryAsset(release.assets || []);
   if (!asset) {
-    throw new Error("Could not find a llama.cpp Windows binary in the latest release.");
+    throw new Error(
+      "Could not find a llama.cpp Windows binary in the latest release.",
+    );
   }
 
   const zipPath = path.join(cacheDir, asset.name);
@@ -185,21 +283,36 @@ async function ensureLlamaBinary(app) {
 
   await fs.mkdir(extractDir, { recursive: true });
   await downloadFile(asset.browser_download_url, zipPath);
+
+  // Verify checksum if available in the release; require it unless SKIP_LLAMA_CHECKSUM=1
+  await verifyChecksumForAsset(release, asset, zipPath);
+
   await expandArchive(zipPath, extractDir);
 
-  const binaryName = process.platform === "win32" ? "llama-server.exe" : "llama-server";
+  const binaryName =
+    process.platform === "win32" ? "llama-server.exe" : "llama-server";
   const binaryPath = await findFileRecursive(extractDir, binaryName);
 
   if (!binaryPath) {
-    throw new Error("Downloaded llama.cpp archive did not contain llama-server.");
+    throw new Error(
+      "Downloaded llama.cpp archive did not contain llama-server.",
+    );
   }
 
-  await fs.writeFile(manifestPath, JSON.stringify({
-    release: release.tag_name,
-    asset: asset.name,
-    binaryPath,
-    preset,
-  }, null, 2), "utf8");
+  await fs.writeFile(
+    manifestPath,
+    JSON.stringify(
+      {
+        release: release.tag_name,
+        asset: asset.name,
+        binaryPath,
+        preset,
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
 
   return { ...preset, binaryPath };
 }
@@ -262,19 +375,23 @@ async function startLocalAi(app) {
   runtime.context = context;
   runtime.status = "downloading-model";
 
-  const child = spawn(binaryPath, [
-    "--host",
-    LOCAL_HOST,
-    "--port",
-    String(LOCAL_PORT),
-    "-hf",
-    `${repo}:${quant}`,
-    "-c",
-    String(context),
-  ], {
-    stdio: "ignore",
-    windowsHide: true,
-  });
+  const child = spawn(
+    binaryPath,
+    [
+      "--host",
+      LOCAL_HOST,
+      "--port",
+      String(LOCAL_PORT),
+      "-hf",
+      `${repo}:${quant}`,
+      "-c",
+      String(context),
+    ],
+    {
+      stdio: "ignore",
+      windowsHide: true,
+    },
+  );
 
   child.unref();
   runtime.pid = child.pid;
