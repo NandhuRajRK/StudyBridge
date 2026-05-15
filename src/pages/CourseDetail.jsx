@@ -3,8 +3,10 @@ import { studybridge } from "@/api/studybridgeClient";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Plus, Upload, Brain, FileText, Trash2, GitBranch } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import RichTextEditor from "@/components/ui/rich-text-editor";
 import { differenceInDays, format } from "date-fns";
 import TopicList from "@/components/courses/TopicList";
 import MaterialUploader from "@/components/courses/MaterialUploader";
@@ -21,6 +23,7 @@ export default function CourseDetail() {
   const [materials, setMaterials] = useState([]);
   const [notes, setNotes] = useState([]);
   const [sessions, setSessions] = useState([]);
+  const [decks, setDecks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAddTopic, setShowAddTopic] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
@@ -31,18 +34,20 @@ export default function CourseDetail() {
   }, [id]);
 
   const loadData = async () => {
-    const [c, tp, m, n, s] = await Promise.all([
+    const [c, tp, m, n, s, d] = await Promise.all([
       studybridge.entities.Course.filter({ id }, null, 1).then(r => r[0]),
       studybridge.entities.Topic.filter({ course_id: id }, "order", 100),
       studybridge.entities.StudyMaterial.filter({ course_id: id }, "-created_date", 50),
       studybridge.entities.Note.filter({ course_id: id }, "-created_date", 50),
       studybridge.entities.StudySession.filter({ course_id: id }, "-created_date", 10),
+      studybridge.entities.FlashcardDeck.filter({ course_id: id }, "-created_date", 100),
     ]);
     setCourse(c);
     setTopics(tp);
     setMaterials(m);
     setNotes(n);
     setSessions(s);
+    setDecks(d);
     setLoading(false);
   };
 
@@ -141,6 +146,7 @@ export default function CourseDetail() {
             <TabsTrigger value="topics">Topics ({topics.length})</TabsTrigger>
             <TabsTrigger value="materials">Materials ({materials.length})</TabsTrigger>
             <TabsTrigger value="notes">Notes ({notes.length})</TabsTrigger>
+            <TabsTrigger value="flashcards">Flashcards ({decks.length})</TabsTrigger>
           </TabsList>
 
           <TabsContent value="overview">
@@ -163,6 +169,10 @@ export default function CourseDetail() {
 
           <TabsContent value="notes">
             <NotesList notes={notes} onDelete={(note) => handleDelete("Note", note, note.title || "note")} />
+          </TabsContent>
+
+          <TabsContent value="flashcards">
+            <DecksList decks={decks} courseId={course.id} onReload={loadData} onDelete={(deck) => handleDelete("FlashcardDeck", deck, deck.title || "flashcard deck")} />
           </TabsContent>
         </Tabs>
       </div>
@@ -251,6 +261,106 @@ function Empty({ icon: Icon, text }) {
     <div className="bg-card border rounded-lg p-8 text-center">
       <Icon className="w-8 h-8 text-muted-foreground/30 mx-auto mb-2" />
       <p className="text-sm text-muted-foreground">{text}</p>
+    </div>
+  );
+}
+
+function normalizeDeckCards(deck) {
+  if (Array.isArray(deck?.cards)) return deck.cards;
+  if (Array.isArray(deck?.flashcards)) return deck.flashcards;
+  return [];
+}
+
+function DecksList({ decks, courseId, onReload, onDelete }) {
+  const [editingDeckId, setEditingDeckId] = useState("");
+  const [draftTitle, setDraftTitle] = useState("");
+  const [draftCards, setDraftCards] = useState([]);
+  const [selectedCardIndex, setSelectedCardIndex] = useState(0);
+
+  if (decks.length === 0) {
+    return <Empty icon={FileText} text="No flashcard decks yet. Generate one from Study session." />;
+  }
+
+  const openEditor = (deck) => {
+    setEditingDeckId(deck.id);
+    setDraftTitle(deck.title || "Untitled deck");
+    setDraftCards(normalizeDeckCards(deck).map((item) => ({
+      front: item?.front || "",
+      back: item?.back || "",
+      source_ids: Array.isArray(item?.source_ids) ? item.source_ids : [],
+    })));
+    setSelectedCardIndex(0);
+  };
+
+  const saveDeck = async () => {
+    const cards = draftCards.filter((item) => item.front.trim() && item.back.trim());
+    if (!editingDeckId) return;
+    await studybridge.entities.FlashcardDeck.update(editingDeckId, {
+      title: draftTitle.trim() || "Untitled deck",
+      cards,
+      flashcards: cards,
+      card_count: cards.length,
+      course_id: courseId,
+    });
+    setEditingDeckId("");
+    await onReload?.();
+  };
+
+  return (
+    <div className="space-y-3">
+      {decks.map((deck) => (
+        <div key={deck.id} className="rounded-lg border bg-card p-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-medium">{deck.title || "Untitled deck"}</p>
+            <div className="flex items-center gap-2">
+              <Button type="button" size="sm" variant="outline" onClick={() => openEditor(deck)}>Edit cards</Button>
+              <DeleteButton onDelete={() => onDelete(deck)} />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">{normalizeDeckCards(deck).length} cards</p>
+        </div>
+      ))}
+
+      {editingDeckId ? (
+        <div className="rounded-lg border bg-card p-4 space-y-3">
+          <Input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder="Deck title" />
+          <div className="flex flex-wrap gap-2">
+            {draftCards.map((_, index) => (
+              <Button key={`card-select-${index}`} type="button" size="sm" variant={index === selectedCardIndex ? "default" : "outline"} onClick={() => setSelectedCardIndex(index)}>
+                Card {index + 1}
+              </Button>
+            ))}
+          </div>
+          {draftCards[selectedCardIndex] ? (
+            <div className="rounded border p-2 space-y-2">
+              <Input
+                value={draftCards[selectedCardIndex].front}
+                placeholder="Front"
+                onChange={(event) => setDraftCards((prev) => prev.map((card, i) => (i === selectedCardIndex ? { ...card, front: event.target.value } : card)))}
+              />
+              <RichTextEditor
+                value={draftCards[selectedCardIndex].back}
+                onChange={(value) => setDraftCards((prev) => prev.map((card, i) => (i === selectedCardIndex ? { ...card, back: value } : card)))}
+                placeholder="Back"
+              />
+              <Button type="button" size="sm" variant="outline" onClick={() => {
+                setDraftCards((prev) => prev.filter((_, i) => i !== selectedCardIndex));
+                setSelectedCardIndex((current) => Math.max(0, current - 1));
+              }}>Remove</Button>
+            </div>
+          ) : null}
+          <div className="flex gap-2">
+            <Button type="button" variant="outline" onClick={() => {
+              setDraftCards((prev) => {
+                const next = [...prev, { front: "", back: "", source_ids: [] }];
+                setSelectedCardIndex(next.length - 1);
+                return next;
+              });
+            }}>Add card</Button>
+            <Button type="button" onClick={saveDeck}>Save deck</Button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

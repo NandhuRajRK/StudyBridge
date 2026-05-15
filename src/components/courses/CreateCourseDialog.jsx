@@ -4,7 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import RichTextEditor from "@/components/ui/rich-text-editor";
 
 const COLORS = ['#3B5BDB', '#1098AD', '#37B24D', '#F59F00', '#E64980', '#7950F2', '#FD7E14', '#495057'];
 
@@ -85,11 +85,10 @@ export default function CreateCourseDialog({ open, onClose, onCreated }) {
 
           <div>
             <Label>Description</Label>
-            <Textarea 
-              value={form.description} 
-              onChange={e => setForm(f => ({ ...f, description: e.target.value }))} 
+            <RichTextEditor
+              value={form.description}
+              onChange={value => setForm(f => ({ ...f, description: value }))}
               placeholder="Brief course description..."
-              rows={2}
             />
           </div>
 

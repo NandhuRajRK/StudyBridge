@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
+import RichTextEditor from "@/components/ui/rich-text-editor";
 
 const DEFAULT_FORM = {
   title: "",
@@ -163,7 +163,11 @@ export default function AddTaskDialog({ open, onClose, courses, topics = [], onC
 
           <div>
             <Label>What should I do?</Label>
-            <Textarea value={form.instructions} onChange={e => updateForm({ instructions: e.target.value })} placeholder="Read the summary, make 5 flashcards, then solve 3 practice questions." rows={3} />
+            <RichTextEditor
+              value={form.instructions}
+              onChange={(value) => updateForm({ instructions: value })}
+              placeholder="Read the summary, make 5 flashcards, then solve 3 practice questions."
+            />
           </div>
 
           <div>

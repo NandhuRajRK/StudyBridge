@@ -4,7 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import RichTextEditor from "@/components/ui/rich-text-editor";
 
 export default function AddTopicDialog({ open, onClose, courseId, onCreated }) {
   const [title, setTitle] = useState('');
@@ -46,7 +46,7 @@ export default function AddTopicDialog({ open, onClose, courseId, onCreated }) {
           </div>
           <div>
             <Label>Description</Label>
-            <Textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Brief description..." rows={2} />
+            <RichTextEditor value={description} onChange={setDescription} placeholder="Brief description..." />
           </div>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
