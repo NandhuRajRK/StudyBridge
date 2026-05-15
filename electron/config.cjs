@@ -1,6 +1,20 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
+let keytar = null;
+try {
+  keytar = require("keytar");
+} catch {
+  keytar = null;
+}
+
+const KEYCHAIN_SERVICE = "StudyBridge";
+const KEY_ACCOUNTS = {
+  google: "studybridge-google-api-key",
+  openai: "studybridge-openai-api-key",
+  anthropic: "studybridge-anthropic-api-key",
+};
+
 const DEFAULT_CONFIG = {
   setup: {
     localAiChecked: false,
@@ -45,19 +59,82 @@ function getConfigPath(app) {
   return path.join(app.getPath("userData"), "studybridge-config.json");
 }
 
+async function readSecret(key) {
+  if (!keytar) return null;
+  try {
+    return await keytar.getPassword(KEYCHAIN_SERVICE, key);
+  } catch {
+    return null;
+  }
+}
+
+async function writeSecret(key, value) {
+  if (!keytar) return false;
+  try {
+    if (!value) {
+      await keytar.deletePassword(KEYCHAIN_SERVICE, key);
+      return true;
+    }
+    await keytar.setPassword(KEYCHAIN_SERVICE, key, String(value));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function readConfig(app) {
   const configPath = getConfigPath(app);
+  let base = null;
   try {
     const raw = await fs.readFile(configPath, "utf8");
-    return mergeConfig(JSON.parse(raw));
+    base = mergeConfig(JSON.parse(raw));
   } catch {
-    return structuredClone(DEFAULT_CONFIG);
+    base = structuredClone(DEFAULT_CONFIG);
   }
+
+  if (keytar) {
+    try {
+      const google = await readSecret(KEY_ACCOUNTS.google);
+      const openai = await readSecret(KEY_ACCOUNTS.openai);
+      const anthropic = await readSecret(KEY_ACCOUNTS.anthropic);
+      base.ai = base.ai || {};
+      if (google) base.ai.googleApiKey = google;
+      if (openai) base.ai.openAiApiKey = openai;
+      if (anthropic) base.ai.anthropicApiKey = anthropic;
+    } catch {
+      // fall back to file-backed values
+    }
+  }
+
+  return base;
 }
 
 async function writeConfig(app, config) {
   const configPath = getConfigPath(app);
   const merged = mergeConfig(config);
+
+  if (keytar && merged?.ai) {
+    const googleOk = await writeSecret(
+      KEY_ACCOUNTS.google,
+      merged.ai.googleApiKey || "",
+    );
+    const openaiOk = await writeSecret(
+      KEY_ACCOUNTS.openai,
+      merged.ai.openAiApiKey || "",
+    );
+    const anthropicOk = await writeSecret(
+      KEY_ACCOUNTS.anthropic,
+      merged.ai.anthropicApiKey || "",
+    );
+
+    merged.ai = {
+      ...merged.ai,
+      googleApiKey: googleOk ? "" : merged.ai.googleApiKey,
+      openAiApiKey: openaiOk ? "" : merged.ai.openAiApiKey,
+      anthropicApiKey: anthropicOk ? "" : merged.ai.anthropicApiKey,
+    };
+  }
+
   await fs.mkdir(path.dirname(configPath), { recursive: true });
   await fs.writeFile(configPath, JSON.stringify(merged, null, 2), "utf8");
   return merged;
