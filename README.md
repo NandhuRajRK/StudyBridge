@@ -39,6 +39,39 @@ The full student guide lives inside the app at `Docs`.
 
 For provider-specific setup and official references, use the `Official docs` dropdown in `Settings`.
 
+## Architecture
+
+StudyBridge is an Electron desktop app with a React renderer. Data is stored locally and AI calls are routed through the Electron main process to either local runtimes (Ollama/llama.cpp) or cloud providers.
+
+```mermaid
+flowchart LR
+  subgraph Desktop["Desktop App (Electron)"]
+    R["Renderer (React UI)\n- Pages/Components\n- Study workflows\n- Context assembly triggers"]
+    M["Main Process\n- IPC handlers\n- Security controls\n- AI routing\n- Local runtime mgmt"]
+    S["Local Store\n- Entity rows\n- Upload storage\n- Profile/config"]
+
+    R <--> |"IPC (preload bridge)"| M
+    M <--> |"CRUD, uploads"| S
+  end
+
+  subgraph LocalAI["Local AI"]
+    O["Ollama\nHTTP: /api/*"]
+    L["llama.cpp\nOpenAI-compatible\nHTTP: /v1/*"]
+  end
+
+  subgraph CloudAI["Cloud AI"]
+    G["Google Gemini API"]
+    OA["OpenAI API"]
+    A["Anthropic API"]
+  end
+
+  M --> |"Local provider"| O
+  M --> |"Local provider"| L
+  M --> |"Cloud provider"| G
+  M --> |"Cloud provider"| OA
+  M --> |"Cloud provider"| A
+```
+
 ## Desktop
 
 - Windows-only desktop build
