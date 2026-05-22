@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { studybridge } from "@/api/studybridgeClient";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -11,8 +11,11 @@ import { loadStudyContextBundle } from "@/lib/aiContext";
 import { Download, GitBranch, HelpCircle, Loader2, Move, Pencil, Plus, RefreshCw, Save, Sparkles, Trash2, X, ZoomIn, ZoomOut } from "lucide-react";
 import { useLocale } from "@/lib/locale";
 import { downloadMindMapMarkdown, downloadOpml } from "@/lib/exporters";
-import { Background, ReactFlow, ViewportPortal, MarkerType } from "@xyflow/react";
+import { Background, Controls, MiniMap, Panel, ReactFlow, ViewportPortal, MarkerType, ConnectionMode } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import MindMapNode from "@/pages/mindmap/MindMapNode";
+import MindMapEdge from "@/pages/mindmap/MindMapEdge";
+import { layoutWithElk } from "@/pages/mindmap/elkLayout";
 
 const ROOT_NODE_COLOR = "#3B5BDB";
 const DEFAULT_NODE_COLOR = "#1098AD";
@@ -177,57 +180,16 @@ function iconButton(tooltip, icon, onClick, disabled = false) {
   );
 }
 
-function toFlowNode(node, selectedNodeId, onEditNode) {
-  const isRoot = node.parentId === null;
-  const active = node.id === selectedNodeId;
-  return {
-    id: node.id,
-    position: { x: Number(node.x || 0), y: Number(node.y || 0) },
-    selectable: true,
-    draggable: true,
-    data: {
-      label: (
-        <div className="min-w-0">
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex min-w-0 items-start gap-2">
-              <span
-                className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full"
-                style={{ backgroundColor: active ? "white" : (node.color || DEFAULT_NODE_COLOR) }}
-              />
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium leading-tight">{node.title}</p>
-                {node.note ? (
-                  <p className={`mt-1 line-clamp-2 text-xs leading-5 ${active ? "text-primary-foreground/80" : "text-muted-foreground"}`}>
-                    {node.note}
-                  </p>
-                ) : null}
-              </div>
-            </div>
-            <button
-              type="button"
-              className={`nodrag nopan inline-flex h-7 w-7 shrink-0 items-center justify-center rounded transition-colors ${active ? "hover:bg-white/20" : "hover:bg-muted"}`}
-              onClick={(event) => {
-                event.stopPropagation();
-                onEditNode(node.id);
-              }}
-              aria-label={`Edit ${node.title}`}
-            >
-              <Pencil className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-      ),
-    },
-    style: {
-      width: isRoot ? 260 : 220,
-      borderRadius: 14,
-      border: active ? "1px solid hsl(var(--primary))" : "1px solid hsl(var(--border))",
-      background: active ? "hsl(var(--primary))" : "hsl(var(--card))",
-      color: active ? "hsl(var(--primary-foreground))" : "hsl(var(--foreground))",
-      boxShadow: active ? "0 10px 24px rgba(37, 99, 235, 0.22)" : "0 8px 18px rgba(15, 23, 42, 0.08)",
-      padding: 0,
-    },
-  };
+function buildsCycle(nodes, parentId, childId) {
+  if (!parentId || !childId || parentId === childId) return true;
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  let cursor = parentId;
+  while (cursor) {
+    if (cursor === childId) return true;
+    const next = byId.get(cursor);
+    cursor = next?.parentId || null;
+  }
+  return false;
 }
 
 export default function MindMap({ forcedCourseId = "" }) {
@@ -247,6 +209,10 @@ export default function MindMap({ forcedCourseId = "" }) {
   const [runtime, setRuntime] = useState(null);
   const [rfInstance, setRfInstance] = useState(null);
   const [editingNodeId, setEditingNodeId] = useState("");
+  const [layouting, setLayouting] = useState(false);
+  const [layoutDirection, setLayoutDirection] = useState("RIGHT");
+  const [focusRootId, setFocusRootId] = useState("");
+  const connectStartRef = useRef({ nodeId: "", handleId: "" });
 
   useEffect(() => {
     loadDesktopAiRuntime().then(setRuntime);
@@ -305,29 +271,58 @@ export default function MindMap({ forcedCourseId = "" }) {
   const selectedNode = nodes.find((node) => node.id === selectedNodeId) || null;
   const editingNode = nodes.find((node) => node.id === editingNodeId) || null;
   const aiUnavailable = isDesktopAiUnavailable(runtime);
+  const colorMode = typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "dark" : "light";
 
   const openNodeEditor = useCallback((nodeId) => {
     setSelectedNodeId(nodeId);
     setEditingNodeId(nodeId);
   }, []);
 
-  const flowNodes = useMemo(
-    () => nodes.map((node) => toFlowNode(node, selectedNodeId, openNodeEditor)),
-    [nodes, selectedNodeId, openNodeEditor],
-  );
+  const visibleNodeIds = useMemo(() => {
+    if (!focusRootId) return new Set(nodes.map((node) => node.id));
+    const focused = nodes.find((node) => node.id === focusRootId);
+    if (!focused) return new Set(nodes.map((node) => node.id));
+    return collectDescendants(nodes, focusRootId);
+  }, [nodes, focusRootId]);
+
+  const flowNodes = useMemo(() => {
+    const filtered = nodes.filter((node) => visibleNodeIds.has(node.id));
+    return filtered.map((node) => ({
+      id: node.id,
+      type: "mindmapNode",
+      position: { x: Number(node.x || 0), y: Number(node.y || 0) },
+      selectable: true,
+      draggable: true,
+      data: {
+        title: node.title,
+        note: node.note,
+        color: node.color || DEFAULT_NODE_COLOR,
+        onEdit: openNodeEditor,
+      },
+    }));
+  }, [nodes, openNodeEditor, visibleNodeIds]);
 
   const flowEdges = useMemo(
     () => nodes
-      .filter((node) => node.parentId)
-      .map((node) => ({
-        id: `e-${node.parentId}-${node.id}`,
-        source: node.parentId,
-        target: node.id,
-        type: "smoothstep",
-        markerEnd: { type: MarkerType.ArrowClosed },
-        style: { stroke: "hsl(var(--border))", strokeWidth: 1.6 },
-      })),
-    [nodes],
+      .filter((node) => node.parentId && visibleNodeIds.has(node.id) && visibleNodeIds.has(node.parentId))
+      .map((node) => {
+        const edgeId = `e-${node.parentId}-${node.id}`;
+        return {
+          id: edgeId,
+          source: node.parentId,
+          target: node.id,
+          type: "mindmapEdge",
+          markerEnd: { type: MarkerType.ArrowClosed },
+          style: { stroke: "hsl(var(--border))", strokeWidth: 1.6 },
+          data: {
+            label: "",
+            onDelete: () => {
+              setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, parentId: null } : item)));
+            },
+          },
+        };
+      }),
+    [nodes, visibleNodeIds],
   );
 
   const onFlowNodesChange = useCallback((changes) => {
@@ -344,6 +339,40 @@ export default function MindMap({ forcedCourseId = "" }) {
         : item
     )));
   }, []);
+
+  const onConnect = useCallback((params) => {
+    const sourceId = params?.source;
+    const targetId = params?.target;
+    if (!sourceId || !targetId) return;
+    if (buildsCycle(nodes, sourceId, targetId)) return;
+    setNodes((prev) => prev.map((node) => (node.id === targetId ? { ...node, parentId: sourceId } : node)));
+  }, [nodes]);
+
+  const onConnectStart = useCallback((_, { nodeId, handleId }) => {
+    connectStartRef.current = { nodeId: nodeId || "", handleId: handleId || "" };
+  }, []);
+
+  const onConnectEnd = useCallback((event) => {
+    const { nodeId } = connectStartRef.current;
+    if (!nodeId) return;
+    const targetIsPane = event?.target?.classList?.contains("react-flow__pane");
+    if (!targetIsPane) return;
+
+    const parentNode = nodes.find((node) => node.id === nodeId);
+    if (!parentNode) return;
+    const nextNode = {
+      id: makeId(),
+      parentId: parentNode.id,
+      title: "New branch",
+      note: "",
+      color: DEFAULT_NODE_COLOR,
+      x: Number(parentNode.x || 0) + 240,
+      y: Number(parentNode.y || 0) + ((Math.random() - 0.5) * 120),
+    };
+    setNodes((prev) => [...prev, nextNode]);
+    setSelectedNodeId(nextNode.id);
+    setEditingNodeId(nextNode.id);
+  }, [nodes]);
 
   const addChildNode = () => {
     const parentNode = editingNode || selectedNode;
@@ -383,9 +412,29 @@ export default function MindMap({ forcedCourseId = "" }) {
     setNodes(seeded);
     setSelectedNodeId(seeded[0]?.id || "");
     setEditingNodeId("");
+    setFocusRootId("");
     requestAnimationFrame(() => {
       rfInstance?.fitView({ padding: 0.2, duration: 350 });
     });
+  };
+
+  const applyAutoLayout = async () => {
+    if (!rfInstance || nodes.length === 0) return;
+    setLayouting(true);
+    try {
+      const laidOut = await layoutWithElk({ nodes: flowNodes, edges: flowEdges, direction: layoutDirection });
+      const byId = new Map(laidOut.map((node) => [node.id, node.position]));
+      setNodes((prev) => prev.map((node) => {
+        const position = byId.get(node.id);
+        return position ? { ...node, x: position.x, y: position.y } : node;
+      }));
+      requestAnimationFrame(() => rfInstance.fitView({ padding: 0.2, duration: 350 }));
+    } catch (error) {
+      console.error("Failed to auto-layout mind map", error);
+      window.alert(error.message || "Failed to auto-layout mind map");
+    } finally {
+      setLayouting(false);
+    }
   };
 
   const exportMindMapMarkdown = () => {
@@ -604,6 +653,9 @@ Return JSON with:
               onNodesChange={onFlowNodesChange}
               onNodeClick={(_, node) => setSelectedNodeId(node.id)}
               onNodeDragStop={onNodeDragStop}
+              onConnect={onConnect}
+              onConnectStart={onConnectStart}
+              onConnectEnd={onConnectEnd}
               onPaneClick={() => {
                 setSelectedNodeId("");
                 setEditingNodeId("");
@@ -612,12 +664,49 @@ Return JSON with:
               fitView
               minZoom={0.2}
               maxZoom={2.4}
-              nodesConnectable={false}
+              nodesConnectable
+              connectionMode={ConnectionMode.Loose}
               elementsSelectable
               deleteKeyCode={null}
               className="bg-gradient-to-b from-background to-muted/20"
+              nodeTypes={{ mindmapNode: MindMapNode }}
+              edgeTypes={{ mindmapEdge: MindMapEdge }}
+              colorMode={colorMode}
             >
               <Background gap={24} size={1.2} color="hsl(var(--border))" />
+              <Controls position="bottom-right" />
+              <MiniMap
+                pannable
+                zoomable
+                className="!bg-background !border !border-border"
+                nodeColor={(node) => node?.data?.color || DEFAULT_NODE_COLOR}
+              />
+              <Panel position="top-right" className="flex items-center gap-2 rounded-xl border bg-background/90 px-2 py-2 shadow-sm backdrop-blur">
+                <Button type="button" size="sm" variant="outline" onClick={applyAutoLayout} disabled={layouting || flowNodes.length === 0}>
+                  {layouting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  Auto-layout
+                </Button>
+                <Select value={layoutDirection} onValueChange={setLayoutDirection}>
+                  <SelectTrigger className="h-9 w-[150px]">
+                    <SelectValue placeholder="Direction" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="RIGHT">Left → Right</SelectItem>
+                    <SelectItem value="LEFT">Right → Left</SelectItem>
+                    <SelectItem value="DOWN">Top → Bottom</SelectItem>
+                    <SelectItem value="UP">Bottom → Top</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setFocusRootId((prev) => (prev ? "" : selectedNodeId))}
+                  disabled={!selectedNodeId}
+                >
+                  {focusRootId ? "Exit focus" : "Focus sub-flow"}
+                </Button>
+              </Panel>
 
               {editingNode && (
                 <ViewportPortal>
